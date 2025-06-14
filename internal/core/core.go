@@ -45,8 +45,7 @@ func PortSetUp() (*Self, error) {
 	return &self, err
 }
 
-func TraySync(self *Self, peer *Peer) error {
-	defaultTray := `C:\Users\skiko\go\QuickPort\tray`
+func TraySync(self *Self, peer *Peer, defaultTray string) error {
 	items, err := tray.GetTrayItems(defaultTray)
 	if err != nil {
 		return err
@@ -64,12 +63,50 @@ func TraySync(self *Self, peer *Peer) error {
 	return nil
 }
 
+func receiveFromPeer(self *Self, peer *Peer) (*BaseData, error) {
+	buf := make([]byte, 1024)
+	for {
+		n, peerAddr, err := self.Conn.ReadFromUDP(buf)
+		if err != nil {
+			return nil, err
+		}
+
+		if peerAddr.IP.String() != peer.Addr.Ip.String() || peerAddr.Port != peer.Addr.Port {
+			continue
+		}
+
+		var meta BaseData
+		err = json.Unmarshal(buf[:n], &meta)
+		if err != nil {
+			return nil, err
+		}
+
+		return &meta, nil
+	}
+}
+
+func TrayRecieve(self *Self, peer *Peer) (*[]tray.FileMeta, error) {
+	meta, err := receiveFromPeer(self, peer)
+	if err != nil {
+		return nil, err
+	}
+
+	if meta.Type != SyncTray {
+		return nil, fmt.Errorf("invaid packet")
+	}
+
+	return ConvertMapToFileMeta(meta.Data)
+
+}
+
 func Sync(self *Self, peer *Peer) (*Peer, error) {
 	port := utils.GetPort()
 	conn, err := ListenUDP(port)
 	if err != nil {
 		return nil, err
 	}
+
+	self.Conn = conn
 
 	logrus.Infof("Listening on %s:%d", string(self.LocalAddr.Ip.String()), self.LocalAddr.Port)
 
@@ -79,7 +116,29 @@ func Sync(self *Self, peer *Peer) (*Peer, error) {
 		return nil, err
 	}
 
-	//wait peer auth
+	meta, err := receiveFromPeer(self, peer)
+	if err != nil {
+		return nil, err
+	}
+
+	if meta.Type != Auth {
+		return nil, err
+	}
+
+	authmeta, err := ConvertMapToAuthMeta(meta)
+	if err != nil {
+		return nil, err
+	}
+
+	switch authmeta.Flag {
+	case tray.AccessReq:
+		return nil, fmt.Errorf("invaid packet")
+	case tray.Allow:
+		logrus.Info("Connected!")
+	case tray.Deny:
+		logrus.Info("Access denied")
+		return nil, nil
+	}
 
 	return peer, nil
 }
@@ -116,6 +175,7 @@ waitPeer:
 	for {
 		n, peerAddr, err := conn.ReadFromUDP(buf)
 		if err != nil {
+			logrus.Error(err)
 			continue
 		}
 
@@ -228,7 +288,6 @@ func SendPing(conn *net.UDPConn, targetAddr string) error {
 
 // data share
 func Write(conn *net.UDPConn, targetAddr string, data *BaseData) error {
-	logrus.Info(*data)
 	raddr, err := net.ResolveUDPAddr("udp", targetAddr)
 	if err != nil {
 		return err

@@ -65,17 +65,26 @@ func main() {
 
 		peer, err := core.SyncListener(self)
 		if err != nil {
+			logrus.Error(err)
 			return
 		}
 
-		logrus.Info(peer.Addr, self)
+		logrus.Info(*peer)
 
-		err = core.TraySync(self, peer)
+		tray, err := core.TrayRecieve(self, peer)
 		if err != nil {
 			logrus.Error(err)
 			return
 		}
 
+		logrus.Info(*tray)
+
+		logrus.Info("do sync")
+		err = core.TraySync(self, peer, `C:\Users\skiko\go\QuickPort\tray`)
+		if err != nil {
+			logrus.Error(err)
+			return
+		}
 	case utils.UseToken:
 		tty, err := utils.UseTty()
 		if err != nil {
@@ -109,13 +118,27 @@ func main() {
 			return
 		}
 
-		logrus.Info(peer)
+		if peer == nil {
+			logrus.Error(err)
+			return
+		}
 
-		err = core.TraySync(self, peer)
+		logrus.Info(*peer)
+
+		logrus.Info("do sync")
+		err = core.TraySync(self, peer, `C:\Users\skiko\go\QuickPort\tray2`)
 		if err != nil {
 			logrus.Error(err)
 			return
 		}
+
+		tray, err := core.TrayRecieve(self, peer)
+		if err != nil {
+			logrus.Error(err)
+			return
+		}
+
+		logrus.Info(*tray)
 
 	case utils.DebugLevel:
 
