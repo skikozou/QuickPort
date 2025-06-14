@@ -5,7 +5,8 @@ import "net"
 type dataType int
 
 const (
-	TraySync dataType = iota
+	SyncTray dataType = iota
+	Auth
 	Message
 	File
 )

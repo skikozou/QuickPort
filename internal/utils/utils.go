@@ -1,7 +1,6 @@
 package utils
 
 import (
-	"fmt"
 	"net"
 
 	"github.com/mattn/go-tty"
@@ -18,11 +17,15 @@ func GetPort() int {
 }
 
 func CheckPort(port int) bool {
-	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	udpAddr := net.UDPAddr{
+		IP:   net.IPv4zero,
+		Port: port,
+	}
+	udpLn, err := net.ListenUDP("udp", &udpAddr)
 	if err != nil {
 		return false
 	}
-	ln.Close()
+	udpLn.Close()
 	return true
 }
 

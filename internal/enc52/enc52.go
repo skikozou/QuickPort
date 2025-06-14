@@ -33,3 +33,5 @@ func Decode(encoded string) (string, error) {
 	}
 	return string(decoded), nil
 }
+
+//high*52 + low

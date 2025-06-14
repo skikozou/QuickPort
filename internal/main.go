@@ -40,6 +40,9 @@ func SelectMode() (utils.StartUpMode, error) {
 }
 
 func main() {
+	/*/
+	/*/
+
 	utils.SetUpLogrus()
 	utils.OpenTty()
 
@@ -60,10 +63,19 @@ func main() {
 		token := core.GenToken(self)
 		logrus.Info(fmt.Sprintf("Your token: %s", token))
 
-		err = core.Listener(self)
+		peer, err := core.SyncListener(self)
 		if err != nil {
 			return
 		}
+
+		logrus.Info(peer.Addr, self)
+
+		err = core.TraySync(self, peer)
+		if err != nil {
+			logrus.Error(err)
+			return
+		}
+
 	case utils.UseToken:
 		tty, err := utils.UseTty()
 		if err != nil {
@@ -83,15 +95,27 @@ func main() {
 			return
 		}
 
-		fmt.Println(data)
+		fmt.Println(data.Name, data.Addr.Ip, data.Addr.Port)
 
-		_, err = core.PortSetUp()
+		self, err := core.PortSetUp()
 		if err != nil {
 			logrus.Fatal(err)
 			return
 		}
 
-		//send traysync
+		peer, err := core.Sync(self, data)
+		if err != nil {
+			logrus.Error(err)
+			return
+		}
+
+		logrus.Info(peer)
+
+		err = core.TraySync(self, peer)
+		if err != nil {
+			logrus.Error(err)
+			return
+		}
 
 	case utils.DebugLevel:
 

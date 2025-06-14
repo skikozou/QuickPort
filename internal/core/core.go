@@ -5,12 +5,26 @@ import (
 	"QuickPort/utils"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net"
 
 	"github.com/pion/stun"
 	"github.com/sirupsen/logrus"
 )
+
+func GetLocalAddr() (*Address, error) {
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	// 自分側のアドレスを取得
+	return &Address{
+		Ip:   conn.LocalAddr().(*net.UDPAddr).IP,
+		Port: utils.GetPort(),
+	}, nil
+
+}
 
 func PortSetUp() (*Self, error) {
 	self := Self{}
@@ -26,20 +40,48 @@ func PortSetUp() (*Self, error) {
 		return nil, err
 	}
 
-	// 1. STUNで外部IPとポート取得
-	addr, err := GetExternalAddress()
-	if err != nil {
-		log.Fatalln("STUN error:", err)
-	}
-
-	self.GlobalAddr = &Address{
-		Ip:   addr.IP,
-		Port: addr.Port,
-	}
-
-	logrus.Printf("Your external address: %s:%d\n", addr.IP.String(), addr.Port)
+	self.LocalAddr, err = GetLocalAddr()
 
 	return &self, err
+}
+
+func TraySync(self *Self, peer *Peer) error {
+	defaultTray := `C:\Users\skiko\go\QuickPort\tray`
+	items, err := tray.GetTrayItems(defaultTray)
+	if err != nil {
+		return err
+	}
+
+	err = Write(self.Conn, fmt.Sprintf("%s:%d", peer.Addr.Ip.String(), peer.Addr.Port), &BaseData{
+		Type: SyncTray,
+		Data: items,
+	})
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func Sync(self *Self, peer *Peer) (*Peer, error) {
+	port := utils.GetPort()
+	conn, err := ListenUDP(port)
+	if err != nil {
+		return nil, err
+	}
+
+	logrus.Infof("Listening on %s:%d", string(self.LocalAddr.Ip.String()), self.LocalAddr.Port)
+
+	addr := fmt.Sprintf("%s:%d", peer.Addr.Ip.String(), peer.Addr.Port)
+	err = Write(conn, addr, &BaseData{Type: Auth, Data: tray.AuthMeta{Name: self.Name, Flag: tray.AccessReq}})
+	if err != nil {
+		return nil, err
+	}
+
+	//wait peer auth
+
+	return peer, nil
 }
 
 func Listener(self *Self) error {
@@ -60,6 +102,72 @@ func Listener(self *Self) error {
 	return nil
 }
 
+func SyncListener(self *Self) (*Peer, error) {
+	port := utils.GetPort()
+	conn, err := ListenUDP(port)
+	if err != nil {
+		return nil, err
+	}
+
+	logrus.Infof("Listening on %s:%d", string(self.LocalAddr.Ip.String()), self.LocalAddr.Port)
+
+	buf := make([]byte, 1024)
+waitPeer:
+	for {
+		n, peerAddr, err := conn.ReadFromUDP(buf)
+		if err != nil {
+			continue
+		}
+
+		var meta BaseData
+		err = json.Unmarshal(buf[:n], &meta)
+		if err != nil {
+			logrus.Fatal(err)
+			return nil, err
+		}
+
+		if meta.Type != Auth {
+			continue
+		}
+
+		authmeta, err := ConvertMapToAuthMeta(meta.Data)
+		if err != nil {
+			return nil, err
+		}
+
+		tty, err := utils.UseTty()
+		if err != nil {
+			return nil, err
+		}
+
+		for {
+			fmt.Printf("%s (%s:%d) is requesting to connect. Accept? (y/n)\n>", authmeta.Name, peerAddr.IP.String(), peerAddr.Port)
+			answer, err := tty.ReadString()
+			if err != nil {
+				return nil, err
+			}
+
+			switch answer {
+			case "y":
+				logrus.Info("Connected!")
+				self.Conn = conn
+				return &Peer{
+					Name: authmeta.Name,
+					Addr: &Address{
+						Ip:   peerAddr.IP,
+						Port: peerAddr.Port,
+					},
+				}, nil
+			case "n":
+				logrus.Info("Wait other peer...")
+				continue waitPeer
+			default:
+				//none
+			}
+		}
+	}
+}
+
 // UDPポートをバインドして、リッスン状態にする
 func ListenUDP(port int) (*net.UDPConn, error) {
 	addr := net.UDPAddr{
@@ -70,7 +178,6 @@ func ListenUDP(port int) (*net.UDPConn, error) {
 	if err != nil {
 		return nil, err
 	}
-	logrus.Infof("Listening on %s", conn.LocalAddr().String())
 	return conn, nil
 }
 
@@ -121,6 +228,7 @@ func SendPing(conn *net.UDPConn, targetAddr string) error {
 
 // data share
 func Write(conn *net.UDPConn, targetAddr string, data *BaseData) error {
+	logrus.Info(*data)
 	raddr, err := net.ResolveUDPAddr("udp", targetAddr)
 	if err != nil {
 		return err
@@ -150,11 +258,12 @@ func ReceiveSync(conn *net.UDPConn) (*BaseData, error) {
 			return nil, err
 		}
 
-		if meta.Type != TraySync {
+		if meta.Type != SyncTray {
 			continue
 		}
 
-		Read(&meta)
+		//Read(&meta)
+		//ConvertMapToFileMeta()
 
 		return &meta, nil
 	}
@@ -178,26 +287,10 @@ func ReceiveLoop(conn *net.UDPConn) {
 			return
 		}
 
-		Read(&meta)
+		ConvertMapToFileMeta(meta.Data)
 	}
 }
 
-func Read(data *BaseData) {
-	fmt.Println(data.Data)
-	switch data.Type {
-	case TraySync:
-		meta, err := ConvertMapToFileMeta(data.Data)
-		if err != nil {
-			logrus.Fatal("型エラー")
-		}
-
-		data.Data = meta
-	case File:
-
-	case Message:
-
-	}
-}
 func ConvertMapToFileMeta(input any) (*[]tray.FileMeta, error) {
 	// input が map[string]any だと仮定
 	bytes, err := json.Marshal(input)
@@ -206,6 +299,19 @@ func ConvertMapToFileMeta(input any) (*[]tray.FileMeta, error) {
 	}
 
 	var meta []tray.FileMeta
+	err = json.Unmarshal(bytes, &meta)
+	if err != nil {
+		return nil, err
+	}
+	return &meta, nil
+}
+func ConvertMapToAuthMeta(input any) (*tray.AuthMeta, error) {
+	bytes, err := json.Marshal(input)
+	if err != nil {
+		return nil, err
+	}
+
+	var meta tray.AuthMeta
 	err = json.Unmarshal(bytes, &meta)
 	if err != nil {
 		return nil, err
