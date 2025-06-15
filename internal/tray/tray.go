@@ -1,12 +1,11 @@
 package tray
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"io"
+	"hash/fnv"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 )
 
 func GetTrayItems(dir string) ([]FileMeta, error) {
@@ -51,15 +50,12 @@ func NewFileMeta(path string) (*FileMeta, error) {
 }
 
 func HashFile(path string) (string, error) {
-	f, err := os.Open(path)
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
 
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
+	h := fnv.New32a()
+	h.Write([]byte(raw))
+	return strconv.FormatUint(uint64(h.Sum32()), 10), nil
 }

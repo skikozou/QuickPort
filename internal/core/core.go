@@ -12,22 +12,89 @@ import (
 )
 
 func GetLocalAddr() (*Address, error) {
+	// 利用可能なネットワークインターフェースを取得
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, iface := range interfaces {
+		// ループバックや無効なインターフェースをスキップ
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+
+		for _, addr := range addrs {
+			ipNet, ok := addr.(*net.IPNet)
+			if !ok {
+				continue
+			}
+
+			// IPv4のみを対象とし、プライベートIPアドレスを優先
+			if ipNet.IP.To4() != nil && !ipNet.IP.IsLoopback() {
+				// プライベートIPアドレスかチェック
+				if isPrivateIP(ipNet.IP) {
+					return &Address{
+						Ip:   ipNet.IP,
+						Port: utils.GetPort(),
+					}, nil
+				}
+			}
+		}
+	}
+
+	// プライベートIPが見つからない場合は、外部接続で取得
 	conn, err := net.Dial("udp", "8.8.8.8:80")
 	if err != nil {
 		return nil, err
 	}
 	defer conn.Close()
 
-	// 自分側のアドレスを取得
 	return &Address{
 		Ip:   conn.LocalAddr().(*net.UDPAddr).IP,
 		Port: utils.GetPort(),
 	}, nil
-
 }
 
-func PortSetUp() (*Self, error) {
-	self := Self{}
+func GetLocalIPAlternative() (net.IP, error) {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, addr := range addrs {
+		if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+			if ipnet.IP.To4() != nil {
+				// IPv4アドレスで、プライベートアドレス範囲をチェック
+				if isPrivateIP(ipnet.IP) {
+					return ipnet.IP, nil
+				}
+			}
+		}
+	}
+	return nil, fmt.Errorf("no suitable local IP address found")
+}
+func isPrivateIP(ip net.IP) bool {
+	privateRanges := []string{
+		"192.168.0.0/16", // 192.168.0.0 - 192.168.255.255
+	}
+
+	for _, cidr := range privateRanges {
+		_, subnet, _ := net.ParseCIDR(cidr)
+		if subnet.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+func PortSetUp() (*SelfCfg, error) {
+	self := SelfCfg{}
 
 	fmt.Printf("Enter your name: ")
 	tty, err := utils.UseTty()
@@ -41,11 +108,195 @@ func PortSetUp() (*Self, error) {
 	}
 
 	self.LocalAddr, err = GetLocalAddr()
+	if err != nil {
+		// 代替方法を試す
+		logrus.Warn("Primary IP detection failed, trying alternative method")
+		ip, altErr := GetLocalIPAlternative()
+		if altErr != nil {
+			return nil, fmt.Errorf("failed to get local IP: %v (alternative: %v)", err, altErr)
+		}
+		self.LocalAddr = &Address{
+			Ip:   ip,
+			Port: utils.GetPort(),
+		}
+	}
 
 	return &self, err
 }
 
-func TraySync(self *Self, peer *Peer, defaultTray string) error {
+// TrayReceive 関数名を修正（元の TrayRecieve は typo）
+func TrayReceive(self *SelfCfg, peer *PeerCfg) (*[]tray.FileMeta, error) {
+	logrus.Debug("Waiting for tray data from peer...")
+
+	meta, err := receiveFromPeer(self, peer)
+	if err != nil {
+		logrus.Error("Failed to receive from peer:", err)
+		return nil, err
+	}
+
+	if meta.Type != SyncTray {
+		logrus.Error("Invalid packet type, expected SyncTray")
+		return nil, fmt.Errorf("invalid packet type: %d", meta.Type)
+	}
+
+	logrus.Debug("Received tray sync packet")
+	return ConvertMapToFileMeta(meta.Data)
+}
+
+// Sync 関数を改善
+func Sync(self *SelfCfg, peer *PeerCfg) (*PeerCfg, error) {
+	port := utils.GetPort()
+	conn, err := ListenUDP(port)
+	if err != nil {
+		return nil, err
+	}
+
+	self.Conn = conn
+	logrus.Infof("Listening on %s:%d", self.LocalAddr.Ip.String(), port)
+
+	// 認証リクエスト送信
+	addr := fmt.Sprintf("%s:%d", peer.Addr.Ip.String(), peer.Addr.Port)
+	logrus.Debug("Sending auth request to:", addr)
+
+	err = Write(conn, addr, &BaseData{
+		Type: Auth,
+		Data: tray.AuthMeta{Name: self.Name, Flag: tray.AccessReq},
+	})
+	if err != nil {
+		logrus.Error("Failed to send auth request:", err)
+		return nil, err
+	}
+
+	// 認証レスポンス受信
+	logrus.Debug("Waiting for auth response...")
+	meta, err := receiveFromPeer(self, peer)
+	if err != nil {
+		logrus.Error("Failed to receive auth response:", err)
+		return nil, err
+	}
+
+	if meta.Type != Auth {
+		logrus.Error("Invalid response type")
+		return nil, fmt.Errorf("invalid response type: %d", meta.Type)
+	}
+
+	authmeta, err := ConvertMapToAuthMeta(meta.Data)
+	if err != nil {
+		logrus.Error("Failed to parse auth meta:", err)
+		return nil, err
+	}
+
+	switch authmeta.Flag {
+	case tray.AccessReq:
+		return nil, fmt.Errorf("invalid packet - received request instead of response")
+	case tray.Allow:
+		logrus.Info("Connection accepted!")
+	case tray.Deny:
+		logrus.Info("Connection denied by peer")
+		return nil, nil
+	}
+
+	return peer, nil
+}
+
+// SyncListener 関数を改善
+func SyncListener(self *SelfCfg) (*PeerCfg, error) {
+	port := utils.GetPort()
+	conn, err := ListenUDP(port)
+	if err != nil {
+		return nil, err
+	}
+
+	self.Conn = conn
+	self.LocalAddr.Port = port
+
+	logrus.Infof("Listening on %s:%d", self.LocalAddr.Ip.String(), port)
+
+	buf := make([]byte, 1024)
+waitPeer:
+	for {
+		n, peerAddr, err := conn.ReadFromUDP(buf)
+		if err != nil {
+			logrus.Error("UDP read error:", err)
+			continue
+		}
+
+		var meta BaseData
+		err = json.Unmarshal(buf[:n], &meta)
+		if err != nil {
+			logrus.Error("JSON unmarshal error:", err)
+			continue
+		}
+
+		if meta.Type != Auth {
+			logrus.Debug("Ignoring non-auth packet")
+			continue
+		}
+
+		authmeta, err := ConvertMapToAuthMeta(meta.Data)
+		if err != nil {
+			logrus.Error("Failed to parse auth meta:", err)
+			continue
+		}
+
+		if authmeta.Flag != tray.AccessReq {
+			logrus.Debug("Ignoring non-request auth packet")
+			continue
+		}
+
+		tty, err := utils.UseTty()
+		if err != nil {
+			return nil, err
+		}
+
+		for {
+			fmt.Printf("%s (%s:%d) is requesting to connect. Accept? (y/n)\n>",
+				authmeta.Name, peerAddr.IP.String(), peerAddr.Port)
+			answer, err := tty.ReadString()
+			if err != nil {
+				return nil, err
+			}
+
+			peer := &PeerCfg{
+				Name: authmeta.Name,
+				Addr: &Address{
+					Ip:   peerAddr.IP,
+					Port: peerAddr.Port,
+				},
+			}
+
+			switch answer {
+			case "y":
+				// 承認レスポンス送信
+				err = Write(conn, fmt.Sprintf("%s:%d", peerAddr.IP.String(), peerAddr.Port),
+					&BaseData{Type: Auth, Data: tray.AuthMeta{Name: self.Name, Flag: tray.Allow}})
+				if err != nil {
+					logrus.Error("Failed to send allow response:", err)
+					return nil, err
+				}
+
+				logrus.Info("Connection accepted!")
+				return peer, nil
+
+			case "n":
+				// 拒否レスポンス送信
+				err = Write(conn, fmt.Sprintf("%s:%d", peerAddr.IP.String(), peerAddr.Port),
+					&BaseData{Type: Auth, Data: tray.AuthMeta{Name: self.Name, Flag: tray.Deny}})
+				if err != nil {
+					logrus.Error("Failed to send deny response:", err)
+				}
+
+				logrus.Info("Connection denied, waiting for other peer...")
+				continue waitPeer
+
+			default:
+				fmt.Println("Please enter 'y' or 'n'")
+			}
+		}
+	}
+}
+
+func TraySync(self *SelfCfg, peer *PeerCfg, defaultTray string) error {
 	items, err := tray.GetTrayItems(defaultTray)
 	if err != nil {
 		return err
@@ -63,7 +314,7 @@ func TraySync(self *Self, peer *Peer, defaultTray string) error {
 	return nil
 }
 
-func receiveFromPeer(self *Self, peer *Peer) (*BaseData, error) {
+func receiveFromPeer(self *SelfCfg, peer *PeerCfg) (*BaseData, error) {
 	buf := make([]byte, 1024)
 	for {
 		n, peerAddr, err := self.Conn.ReadFromUDP(buf)
@@ -82,149 +333,6 @@ func receiveFromPeer(self *Self, peer *Peer) (*BaseData, error) {
 		}
 
 		return &meta, nil
-	}
-}
-
-func TrayRecieve(self *Self, peer *Peer) (*[]tray.FileMeta, error) {
-	meta, err := receiveFromPeer(self, peer)
-	if err != nil {
-		return nil, err
-	}
-
-	if meta.Type != SyncTray {
-		return nil, fmt.Errorf("invaid packet")
-	}
-
-	return ConvertMapToFileMeta(meta.Data)
-
-}
-
-func Sync(self *Self, peer *Peer) (*Peer, error) {
-	port := utils.GetPort()
-	conn, err := ListenUDP(port)
-	if err != nil {
-		return nil, err
-	}
-
-	self.Conn = conn
-
-	logrus.Infof("Listening on %s:%d", string(self.LocalAddr.Ip.String()), self.LocalAddr.Port)
-
-	addr := fmt.Sprintf("%s:%d", peer.Addr.Ip.String(), peer.Addr.Port)
-	err = Write(conn, addr, &BaseData{Type: Auth, Data: tray.AuthMeta{Name: self.Name, Flag: tray.AccessReq}})
-	if err != nil {
-		return nil, err
-	}
-
-	meta, err := receiveFromPeer(self, peer)
-	if err != nil {
-		return nil, err
-	}
-
-	if meta.Type != Auth {
-		return nil, err
-	}
-
-	authmeta, err := ConvertMapToAuthMeta(meta)
-	if err != nil {
-		return nil, err
-	}
-
-	switch authmeta.Flag {
-	case tray.AccessReq:
-		return nil, fmt.Errorf("invaid packet")
-	case tray.Allow:
-		logrus.Info("Connected!")
-	case tray.Deny:
-		logrus.Info("Access denied")
-		return nil, nil
-	}
-
-	return peer, nil
-}
-
-func Listener(self *Self) error {
-	port := utils.GetPort()
-	conn, err := ListenUDP(port)
-	if err != nil {
-		return err
-	}
-
-	self.Conn = conn
-	self.LocalAddr = &Address{
-		Ip:   []byte("127.0.0.1"),
-		Port: port,
-	}
-
-	fmt.Printf("Your local address:    127.0.0.1:%d\n", port)
-
-	return nil
-}
-
-func SyncListener(self *Self) (*Peer, error) {
-	port := utils.GetPort()
-	conn, err := ListenUDP(port)
-	if err != nil {
-		return nil, err
-	}
-
-	logrus.Infof("Listening on %s:%d", string(self.LocalAddr.Ip.String()), self.LocalAddr.Port)
-
-	buf := make([]byte, 1024)
-waitPeer:
-	for {
-		n, peerAddr, err := conn.ReadFromUDP(buf)
-		if err != nil {
-			logrus.Error(err)
-			continue
-		}
-
-		var meta BaseData
-		err = json.Unmarshal(buf[:n], &meta)
-		if err != nil {
-			logrus.Fatal(err)
-			return nil, err
-		}
-
-		if meta.Type != Auth {
-			continue
-		}
-
-		authmeta, err := ConvertMapToAuthMeta(meta.Data)
-		if err != nil {
-			return nil, err
-		}
-
-		tty, err := utils.UseTty()
-		if err != nil {
-			return nil, err
-		}
-
-		for {
-			fmt.Printf("%s (%s:%d) is requesting to connect. Accept? (y/n)\n>", authmeta.Name, peerAddr.IP.String(), peerAddr.Port)
-			answer, err := tty.ReadString()
-			if err != nil {
-				return nil, err
-			}
-
-			switch answer {
-			case "y":
-				logrus.Info("Connected!")
-				self.Conn = conn
-				return &Peer{
-					Name: authmeta.Name,
-					Addr: &Address{
-						Ip:   peerAddr.IP,
-						Port: peerAddr.Port,
-					},
-				}, nil
-			case "n":
-				logrus.Info("Wait other peer...")
-				continue waitPeer
-			default:
-				//none
-			}
-		}
 	}
 }
 

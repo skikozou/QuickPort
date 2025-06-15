@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"QuickPort/core"
+	"QuickPort/shell"
 	"QuickPort/utils"
 
 	"github.com/sirupsen/logrus"
@@ -40,9 +41,6 @@ func SelectMode() (utils.StartUpMode, error) {
 }
 
 func main() {
-	/*/
-	/*/
-
 	utils.SetUpLogrus()
 	utils.OpenTty()
 
@@ -52,118 +50,38 @@ func main() {
 		return
 	}
 
+	var handle *core.Handle
 	switch mode {
 	case utils.GenToken:
-		self, err := core.PortSetUp()
-		if err != nil {
-			logrus.Fatal(err)
-			return
-		}
-
-		token := core.GenToken(self)
-		logrus.Info(fmt.Sprintf("Your token: %s", token))
-
-		peer, err := core.SyncListener(self)
+		handle, err = core.Host()
 		if err != nil {
 			logrus.Error(err)
 			return
 		}
 
-		logrus.Info(*peer)
-
-		tray, err := core.TrayRecieve(self, peer)
-		if err != nil {
-			logrus.Error(err)
-			return
-		}
-
-		logrus.Info(*tray)
-
-		logrus.Info("do sync")
-		err = core.TraySync(self, peer, `C:\Users\skiko\go\QuickPort\tray`)
-		if err != nil {
-			logrus.Error(err)
-			return
-		}
 	case utils.UseToken:
-		tty, err := utils.UseTty()
+		handle, err = core.Client()
 		if err != nil {
 			logrus.Error(err)
 			return
 		}
-
-		token, err := tty.ReadString()
-		if err != nil {
-			logrus.Error(err)
-			return
-		}
-
-		data, err := core.ParseToken(token)
-		if err != nil {
-			logrus.Error(err)
-			return
-		}
-
-		fmt.Println(data.Name, data.Addr.Ip, data.Addr.Port)
-
-		self, err := core.PortSetUp()
-		if err != nil {
-			logrus.Fatal(err)
-			return
-		}
-
-		peer, err := core.Sync(self, data)
-		if err != nil {
-			logrus.Error(err)
-			return
-		}
-
-		if peer == nil {
-			logrus.Error(err)
-			return
-		}
-
-		logrus.Info(*peer)
-
-		logrus.Info("do sync")
-		err = core.TraySync(self, peer, `C:\Users\skiko\go\QuickPort\tray2`)
-		if err != nil {
-			logrus.Error(err)
-			return
-		}
-
-		tray, err := core.TrayRecieve(self, peer)
-		if err != nil {
-			logrus.Error(err)
-			return
-		}
-
-		logrus.Info(*tray)
 
 	case utils.DebugLevel:
-
+		// デバッグモード
+		logrus.Info("Debug mode selected")
 	}
-	/*/
 
-	fmt.Print("Enter peer address (ip:port): ")
-	var peer string
-	fmt.Scanln(&peer)
+	fmt.Printf("%s:%d <==> %s:%d\n", handle.Self.LocalAddr.Ip.String(), handle.Self.LocalAddr.Port, handle.Peer.Addr.Ip.String(), handle.Peer.Addr.Port)
 
-	go core.ReceiveLoop(conn)
-
-	//tray share
-	defaultTray := `C:\Users\skiko\go\QuickPort\tray`
-	items, err := tray.GetTrayItems(defaultTray)
+	//shell
+	handle, err = shell.Run(handle)
 	if err != nil {
+		logrus.Error(err)
 		return
 	}
 
-	core.Write(conn, peer, &core.BaseData{
-		Type: core.TraySync,
-		Data: items,
-	})
-
-	var wait string
-	fmt.Scanln(&wait)
-	/*/
+	if handle == nil {
+		logrus.Info("Process exit")
+		return
+	}
 }

@@ -1,0 +1,5 @@
+package fileshare
+
+func GetFile() {
+
+}

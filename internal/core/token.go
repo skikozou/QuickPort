@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-func GenToken(self *Self) string {
+func GenToken(self *SelfCfg) string {
 	ip := string(self.LocalAddr.Ip)
 	port := strconv.Itoa(self.LocalAddr.Port)
 	name := self.Name
@@ -17,7 +17,7 @@ func GenToken(self *Self) string {
 	return token
 }
 
-func ParseToken(token string) (*Peer, error) {
+func ParseToken(token string) (*PeerCfg, error) {
 	raw, err := enc52.Decode(token)
 	if err != nil {
 		return nil, err
@@ -31,7 +31,7 @@ func ParseToken(token string) (*Peer, error) {
 		return nil, err
 	}
 
-	return &Peer{
+	return &PeerCfg{
 		Addr: &Address{
 			Ip:   ip,
 			Port: port,

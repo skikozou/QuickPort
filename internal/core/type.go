@@ -21,14 +21,19 @@ type Address struct {
 	Port int
 }
 
-type Peer struct {
+type PeerCfg struct {
 	Name string
 	Addr *Address
 }
 
-type Self struct {
+type SelfCfg struct {
 	Name       string
 	Conn       *net.UDPConn
 	GlobalAddr *Address
 	LocalAddr  *Address
+}
+
+type Handle struct {
+	Self *SelfCfg
+	Peer *PeerCfg
 }
