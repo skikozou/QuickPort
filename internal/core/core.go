@@ -3,9 +3,14 @@ package core
 import (
 	"QuickPort/tray"
 	"QuickPort/utils"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"hash/crc32"
 	"net"
+	"os"
+	"path/filepath"
+	"time"
 
 	"github.com/pion/stun"
 	"github.com/sirupsen/logrus"
@@ -35,6 +40,65 @@ func Reciever(handle *Handle) {
 	}
 }
 
+func receiveFileIndex(handle *Handle) (*FileIndexData, error) {
+	for {
+		meta, err := receiveFromPeer(handle.Self, handle.Peer)
+		if err != nil {
+			return nil, err
+		}
+
+		if meta.Type != FileIndex {
+			continue
+		}
+
+		bytes, err := json.Marshal(meta.Data)
+		if err != nil {
+			return nil, err
+		}
+
+		var indexData FileIndexData
+		err = json.Unmarshal(bytes, &indexData)
+		if err != nil {
+			return nil, err
+		}
+
+		return &indexData, nil
+	}
+}
+
+// receiveFileChunk receives file chunk using custom protocol
+func receiveFileChunk(conn *net.UDPConn) (*FileChunk, error) {
+	buf := make([]byte, ChunkSize+16) // チャンクサイズ + ヘッダー
+
+	n, _, err := conn.ReadFromUDP(buf)
+	if err != nil {
+		return nil, err
+	}
+
+	if n < 12 { // 最小ヘッダーサイズ
+		return nil, fmt.Errorf("packet too small: %d bytes", n)
+	}
+
+	// カスタムプロトコルのパース
+	// [Index:4][Length:4][Checksum:4][Data:Length]
+	index := binary.LittleEndian.Uint32(buf[0:4])
+	length := binary.LittleEndian.Uint32(buf[4:8])
+	checksum := binary.LittleEndian.Uint32(buf[8:12])
+
+	if n < int(12+length) {
+		return nil, fmt.Errorf("incomplete chunk: expected %d bytes, got %d", 12+length, n)
+	}
+
+	data := buf[12 : 12+length]
+
+	return &FileChunk{
+		Index:    index,
+		Length:   length,
+		Checksum: checksum,
+		Data:     data,
+	}, nil
+}
+
 func SendFile(handle *Handle, args *ShellArgs) error {
 	//process
 	//<-send index
@@ -53,29 +117,213 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 		return nil
 	}
 
-	//process
-	//<-request file
+	filePath := args.Head()
 
+	// Step 1: ファイルリクエスト送信
+	logrus.Infof("Requesting file: %s", filePath)
 	reqData := BaseData{
-		Type: FileIndex,
+		Type: FileReqest,
 		Data: FileReqData{
-			FilePath: args.Head(),
+			FilePath: filePath,
 		},
 	}
 
 	raw, err := json.Marshal(reqData)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to marshal request: %v", err)
 	}
 
-	handle.Self.Conn.Write(raw)
-	//->recieve index
-	//<-data req
-	//->file data
-	//<-missing packet list
-	//->recieve missing packet
-	// ~~~~
-	//<-finish packet
+	_, err = handle.Self.Conn.WriteToUDP(raw, &net.UDPAddr{
+		IP:   handle.Peer.Addr.Ip,
+		Port: handle.Peer.Addr.Port,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to send request: %v", err)
+	}
+
+	// Step 2: インデックス情報受信
+	logrus.Info("Waiting for file index...")
+	indexData, err := receiveFileIndex(handle)
+	if err != nil {
+		return fmt.Errorf("failed to receive file index: %v", err)
+	}
+
+	logrus.Infof("File info - Size: %d bytes, Chunks: %d", indexData.TotalSize, indexData.ChunkCount)
+
+	// Step 3: ファイル受信準備
+	outputPath := filepath.Join("./downloads", filepath.Base(filePath))
+	err = os.MkdirAll(filepath.Dir(outputPath), 0755)
+	if err != nil {
+		return fmt.Errorf("failed to create output directory: %v", err)
+	}
+
+	file, err := os.Create(outputPath)
+	if err != nil {
+		return fmt.Errorf("failed to create output file: %v", err)
+	}
+	defer file.Close()
+
+	// Step 4: チャンク受信ループ
+	receivedChunks := make(map[uint32]bool)
+	missingChunks := make([]uint32, 0)
+
+	// 受信開始の合図を送信
+	startData := BaseData{
+		Type: Message,
+		Data: map[string]interface{}{"action": "start_transfer"},
+	}
+	raw, _ = json.Marshal(startData)
+	handle.Self.Conn.WriteToUDP(raw, &net.UDPAddr{
+		IP:   handle.Peer.Addr.Ip,
+		Port: handle.Peer.Addr.Port,
+	})
+
+	logrus.Info("Receiving file chunks...")
+
+	// タイムアウト設定
+	handle.Self.Conn.SetReadDeadline(time.Now().Add(time.Second * TimeoutSeconds))
+
+	for len(receivedChunks) < int(indexData.ChunkCount) {
+		chunk, err := receiveFileChunk(handle.Self.Conn)
+		if err != nil {
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				logrus.Warn("Timeout occurred, requesting missing chunks...")
+				break
+			}
+			return fmt.Errorf("failed to receive chunk: %v", err)
+		}
+
+		// チェックサム検証
+		expectedChecksum := crc32.ChecksumIEEE(chunk.Data)
+		if expectedChecksum != chunk.Checksum {
+			logrus.Warnf("Checksum mismatch for chunk %d, will request again", chunk.Index)
+			continue
+		}
+
+		// チャンクをファイルに書き込み
+		offset := int64(chunk.Index) * int64(ChunkSize)
+		_, err = file.WriteAt(chunk.Data, offset)
+		if err != nil {
+			return fmt.Errorf("failed to write chunk %d: %v", chunk.Index, err)
+		}
+
+		receivedChunks[chunk.Index] = true
+		logrus.Debugf("Received chunk %d/%d", len(receivedChunks), indexData.ChunkCount)
+	}
+
+	// Step 5: 欠落チャンクの確認と再送要求
+	for i := uint32(0); i < indexData.ChunkCount; i++ {
+		if !receivedChunks[i] {
+			missingChunks = append(missingChunks, i)
+		}
+	}
+
+	retryCount := 0
+	for len(missingChunks) > 0 && retryCount < MaxRetries {
+		logrus.Infof("Requesting %d missing chunks (retry %d/%d)", len(missingChunks), retryCount+1, MaxRetries)
+
+		// 欠落チャンクリスト送信
+		missingData := BaseData{
+			Type: Message,
+			Data: MissingPacketData{
+				MissingChunks: missingChunks,
+			},
+		}
+
+		raw, err := json.Marshal(missingData)
+		if err != nil {
+			return fmt.Errorf("failed to marshal missing chunks: %v", err)
+		}
+
+		_, err = handle.Self.Conn.WriteToUDP(raw, &net.UDPAddr{
+			IP:   handle.Peer.Addr.Ip,
+			Port: handle.Peer.Addr.Port,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to send missing chunks request: %v", err)
+		}
+
+		// 欠落チャンクの受信
+		handle.Self.Conn.SetReadDeadline(time.Now().Add(time.Second * TimeoutSeconds))
+
+		for len(missingChunks) > 0 {
+			chunk, err := receiveFileChunk(handle.Self.Conn)
+			if err != nil {
+				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+					break
+				}
+				return fmt.Errorf("failed to receive missing chunk: %v", err)
+			}
+
+			// チェックサム検証
+			expectedChecksum := crc32.ChecksumIEEE(chunk.Data)
+			if expectedChecksum != chunk.Checksum {
+				logrus.Warnf("Checksum mismatch for missing chunk %d", chunk.Index)
+				continue
+			}
+
+			// チャンクをファイルに書き込み
+			offset := int64(chunk.Index) * int64(ChunkSize)
+			_, err = file.WriteAt(chunk.Data, offset)
+			if err != nil {
+				return fmt.Errorf("failed to write missing chunk %d: %v", chunk.Index, err)
+			}
+
+			// 欠落リストから削除
+			for i, missing := range missingChunks {
+				if missing == chunk.Index {
+					missingChunks = append(missingChunks[:i], missingChunks[i+1:]...)
+					break
+				}
+			}
+		}
+
+		retryCount++
+	}
+
+	// Step 6: ファイル整合性チェック
+	file.Close()
+	receivedHash, err := calculateFileHash(outputPath)
+	if err != nil {
+		return fmt.Errorf("failed to calculate file hash: %v", err)
+	}
+
+	if receivedHash != indexData.FileHash {
+		// 終了パケット送信（失敗）
+		finishData := BaseData{
+			Type: Message,
+			Data: FinishPacketData{
+				Success: false,
+				Message: "File hash mismatch",
+			},
+		}
+		raw, _ = json.Marshal(finishData)
+		handle.Self.Conn.WriteToUDP(raw, &net.UDPAddr{
+			IP:   handle.Peer.Addr.Ip,
+			Port: handle.Peer.Addr.Port,
+		})
+
+		return fmt.Errorf("file hash mismatch - expected: %s, got: %s", indexData.FileHash, receivedHash)
+	}
+
+	// Step 7: 終了パケット送信（成功）
+	finishData := BaseData{
+		Type: Message,
+		Data: FinishPacketData{
+			Success: true,
+			Message: "File received successfully",
+		},
+	}
+
+	raw, err = json.Marshal(finishData)
+	if err == nil {
+		handle.Self.Conn.WriteToUDP(raw, &net.UDPAddr{
+			IP:   handle.Peer.Addr.Ip,
+			Port: handle.Peer.Addr.Port,
+		})
+	}
+
+	logrus.Infof("File downloaded successfully: %s", outputPath)
 	return nil
 }
 
