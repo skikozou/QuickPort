@@ -1,6 +1,7 @@
 package core
 
 import (
+	"QuickPort/tray"
 	"fmt"
 	"os"
 	"text/tabwriter"
@@ -27,7 +28,7 @@ func Host() (*Handle, error) {
 
 	// まず自分のトレイを送信
 	logrus.Info("Sending tray items...")
-	err = TraySync(self, peer, `C:\Users\skiko\go\QuickPort\tray`)
+	err = TraySync(self, peer, tray.UseTray())
 	if err != nil {
 		return nil, err
 	}

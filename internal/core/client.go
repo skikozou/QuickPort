@@ -1,6 +1,7 @@
 package core
 
 import (
+	"QuickPort/tray"
 	"QuickPort/utils"
 	"fmt"
 	"os"
@@ -47,14 +48,14 @@ func Client() (*Handle, error) {
 
 	// まず相手のトレイを受信
 	logrus.Info("Waiting for peer's tray...")
-	tray, err := TrayReceive(self, peer)
+	peertray, err := TrayReceive(self, peer)
 	if err != nil {
 		return nil, err
 	}
 
 	// 自分のトレイを送信
 	logrus.Info("Sending tray items...")
-	err = TraySync(self, peer, `C:\Users\skiko\go\QuickPort\tray2`)
+	err = TraySync(self, peer, tray.UseTray())
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +63,7 @@ func Client() (*Handle, error) {
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintf(w, "filename\tsize\thash\n")
-	for _, t := range *tray {
+	for _, t := range *peertray {
 		fmt.Fprintf(w, "%s\t%d\t%s\n", t.Filename, t.Size, t.Hash)
 	}
 	w.Flush()

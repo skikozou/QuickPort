@@ -8,6 +8,16 @@ import (
 	"strconv"
 )
 
+var trayPath string
+
+func UseTray() string {
+	return trayPath
+}
+
+func SetTray(path string) {
+	trayPath = path
+}
+
 func GetTrayItems(dir string) ([]FileMeta, error) {
 	files := []FileMeta{}
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {

@@ -5,6 +5,7 @@ import (
 
 	"QuickPort/core"
 	"QuickPort/shell"
+	"QuickPort/tray"
 	"QuickPort/utils"
 
 	"github.com/sirupsen/logrus"
@@ -51,6 +52,7 @@ func main() {
 	var handle *core.Handle
 	switch mode {
 	case utils.GenToken:
+		tray.SetTray("../tray")
 		handle, err = core.Host()
 		if err != nil {
 			logrus.Error(err)
@@ -58,6 +60,7 @@ func main() {
 		}
 
 	case utils.UseToken:
+		tray.SetTray("../tray2")
 		handle, err = core.Client()
 		if err != nil {
 			logrus.Error(err)

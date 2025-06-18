@@ -26,6 +26,13 @@ func Reciever(handle *Handle) {
 
 		switch basedata.Type {
 		case FileReqest:
+			filereq, err := ConvertMapToFileReqMeta(basedata.Data)
+			if err != nil {
+				logrus.Errorf("Decode Error: %s", err)
+				continue
+			}
+
+			SendFile(handle, filereq.FilePath)
 			//process
 			//<-send index
 			//->data req
@@ -39,6 +46,8 @@ func Reciever(handle *Handle) {
 		}
 	}
 }
+
+func calculateFileHash(string) (string, error)
 
 func receiveFileIndex(handle *Handle) (*FileIndexData, error) {
 	for {
@@ -99,7 +108,7 @@ func receiveFileChunk(conn *net.UDPConn) (*FileChunk, error) {
 	}, nil
 }
 
-func SendFile(handle *Handle, args *ShellArgs) error {
+func SendFile(handle *Handle, path string) error {
 	//process
 	//<-send index
 	//->data req
@@ -772,6 +781,21 @@ func ReceiveLoop(conn *net.UDPConn) {
 
 		ConvertMapToFileMeta(meta.Data)
 	}
+}
+
+func ConvertMapToFileReqMeta(input any) (*FileReqData, error) {
+	// input が map[string]any だと仮定
+	bytes, err := json.Marshal(input)
+	if err != nil {
+		return nil, err
+	}
+
+	var meta FileReqData
+	err = json.Unmarshal(bytes, &meta)
+	if err != nil {
+		return nil, err
+	}
+	return &meta, nil
 }
 
 func ConvertMapToFileMeta(input any) (*[]tray.FileMeta, error) {
