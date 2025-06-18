@@ -11,6 +11,74 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+func Reciever(handle *Handle) {
+	for {
+		basedata, err := receiveFromPeer(handle.Self, handle.Peer)
+		if err != nil {
+			logrus.Debugf("Reciever Error: %s", err)
+			continue
+		}
+
+		switch basedata.Type {
+		case FileReqest:
+			//process
+			//<-send index
+			//->data req
+			//<-file data
+			//->missing packet list
+			//<-send missing packet
+			// ~~~~
+			//->finish packet
+		case Message:
+
+		}
+	}
+}
+
+func SendFile(handle *Handle, args *ShellArgs) error {
+	//process
+	//<-send index
+	//->data req
+	//<-file data
+	//->missing packet list
+	//<-send missing packet
+	// ~~~~
+	//->finish packet
+	return nil
+}
+
+func GetFile(handle *Handle, args *ShellArgs) error {
+	if len(args.Arg) < 1 {
+		fmt.Println("get peer file\nget [path]")
+		return nil
+	}
+
+	//process
+	//<-request file
+
+	reqData := BaseData{
+		Type: FileIndex,
+		Data: FileReqData{
+			FilePath: args.Head(),
+		},
+	}
+
+	raw, err := json.Marshal(reqData)
+	if err != nil {
+		return err
+	}
+
+	handle.Self.Conn.Write(raw)
+	//->recieve index
+	//<-data req
+	//->file data
+	//<-missing packet list
+	//->recieve missing packet
+	// ~~~~
+	//<-finish packet
+	return nil
+}
+
 func GetLocalAddr() (*Address, error) {
 	// 利用可能なネットワークインターフェースを取得
 	interfaces, err := net.Interfaces()

@@ -1,5 +1,9 @@
 package fileshare
 
-func GetFile() {
+import (
+	"QuickPort/core"
+)
+
+func Get(handle *core.Handle, args *core.ShellArgs) {
 
 }

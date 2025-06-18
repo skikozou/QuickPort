@@ -15,7 +15,7 @@ func GetTrayItems(dir string) ([]FileMeta, error) {
 			return nil
 		}
 		if !d.IsDir() {
-			file, err := NewFileMeta(path)
+			file, err := NewFileMeta(path, dir)
 			if err != nil {
 				return nil
 			}
@@ -31,19 +31,24 @@ func GetTrayItems(dir string) ([]FileMeta, error) {
 	return files, nil
 }
 
-func NewFileMeta(path string) (*FileMeta, error) {
+func NewFileMeta(path string, baseDir string) (*FileMeta, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return nil, err
 	}
 
-	hash, err := HashFile(path) // 下に定義
+	hash, err := HashFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	relPath, err := filepath.Rel(baseDir, path)
 	if err != nil {
 		return nil, err
 	}
 
 	return &FileMeta{
-		Filename: info.Name(),
+		Filename: relPath,
 		Size:     info.Size(),
 		Hash:     hash,
 	}, nil

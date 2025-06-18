@@ -17,13 +17,11 @@ func SelectMode() (utils.StartUpMode, error) {
 	for {
 		tty, err := utils.UseTty()
 		if err != nil {
-			logrus.Fatal(err)
 			return utils.DebugLevel, err
 		}
 
 		mode, err := tty.ReadString()
 		if err != nil {
-			logrus.Fatal(err)
 			return utils.DebugLevel, nil
 		}
 
@@ -72,6 +70,9 @@ func main() {
 	}
 
 	fmt.Printf("%s:%d <==> %s:%d\n", handle.Self.LocalAddr.Ip.String(), handle.Self.LocalAddr.Port, handle.Peer.Addr.Ip.String(), handle.Peer.Addr.Port)
+
+	//main reciever
+	go core.Reciever(handle)
 
 	//shell
 	handle, err = shell.Run(handle)
