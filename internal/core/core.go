@@ -34,7 +34,10 @@ func Reciever(handle *Handle) {
 				continue
 			}
 
-			SendFile(handle, filereq.FilePath)
+			err = SendFile(handle, filereq.FilePath)
+			if err != nil {
+				logrus.Error(err)
+			}
 			//process
 			//<-send index
 			//->data req
@@ -68,6 +71,7 @@ func receiveFileIndex(handle *Handle) (*FileIndexData, error) {
 		}
 
 		if meta.Type != FileIndex {
+			logrus.Debug(meta.Data)
 			continue
 		}
 
@@ -121,7 +125,9 @@ func receiveFileChunk(conn *net.UDPConn) (*FileChunk, error) {
 
 func SendFile(handle *Handle, path string) error {
 	// Step 1: ファイルの存在確認とメタデータ取得
-	fileInfo, err := os.Stat(path)
+	fullpath := tray.UseTray() + filepath.Clean(path)
+	fileInfo, err := os.Stat(fullpath)
+	logrus.Debugf("fileinfo: %v", fileInfo)
 	if err != nil {
 		logrus.Errorf("File not found: %s", path)
 		return fmt.Errorf("file not found: %v", err)
@@ -132,13 +138,15 @@ func SendFile(handle *Handle, path string) error {
 	}
 
 	// Step 2: ファイルハッシュ計算
-	fileHash, err := calculateFileHash(path)
+	fileHash, err := calculateFileHash(fullpath)
+	logrus.Debugf("filehash: %s", fileHash)
 	if err != nil {
 		return fmt.Errorf("failed to calculate file hash: %v", err)
 	}
 
 	// Step 3: チャンク数計算
 	chunkCount := uint32((fileInfo.Size() + int64(ChunkSize) - 1) / int64(ChunkSize))
+	logrus.Debugf("chunk count: %d", chunkCount)
 
 	// Step 4: ファイルインデックス情報送信
 	indexData := BaseData{
@@ -405,7 +413,7 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 	logrus.Infof("File info - Size: %d bytes, Chunks: %d", indexData.TotalSize, indexData.ChunkCount)
 
 	// Step 3: ファイル受信準備
-	outputPath := filepath.Join("./downloads", filepath.Base(filePath))
+	outputPath := filepath.Join(tray.UseTray(), filepath.Base(filePath))
 	err = os.MkdirAll(filepath.Dir(outputPath), 0755)
 	if err != nil {
 		return fmt.Errorf("failed to create output directory: %v", err)

@@ -14,8 +14,14 @@ func UseTray() string {
 	return trayPath
 }
 
-func SetTray(path string) {
-	trayPath = path
+func SetTray(path string) error {
+	traypath, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+
+	trayPath = traypath + "\\"
+	return nil
 }
 
 func GetTrayItems(dir string) ([]FileMeta, error) {
