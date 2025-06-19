@@ -69,9 +69,10 @@ func receiveFileIndex(handle *Handle) (*FileIndexData, error) {
 		if err != nil {
 			return nil, err
 		}
+		fmt.Println("geasg") //こいつがでない！！！！！！！！！！！！！！！！！！！！！！！！！
 
 		if meta.Type != FileIndex {
-			logrus.Debug(meta.Data)
+			logrus.Debugf("Ignoring packet type: %d, waiting for FileIndex", meta.Type) // ←ログレベルを修正
 			continue
 		}
 
@@ -160,15 +161,8 @@ func SendFile(handle *Handle, path string) error {
 		},
 	}
 
-	raw, err := json.Marshal(indexData)
-	if err != nil {
-		return fmt.Errorf("failed to marshal file index: %v", err)
-	}
+	err = Write(handle.Self.Conn, handle.Peer.Addr.StrAddr(), &indexData)
 
-	_, err = handle.Self.Conn.WriteToUDP(raw, &net.UDPAddr{
-		IP:   handle.Peer.Addr.Ip,
-		Port: handle.Peer.Addr.Port,
-	})
 	if err != nil {
 		return fmt.Errorf("failed to send file index: %v", err)
 	}
@@ -192,8 +186,8 @@ func SendFile(handle *Handle, path string) error {
 		}
 	}
 
-	// Step 6: ファイルを開く
-	file, err := os.Open(path)
+	// Step 6: ファイルを開く（修正：フルパスを使用）
+	file, err := os.Open(fullpath) // ←ここを修正
 	if err != nil {
 		return fmt.Errorf("failed to open file: %v", err)
 	}
@@ -425,22 +419,29 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 	}
 	defer file.Close()
 
-	// Step 4: チャンク受信ループ
-	receivedChunks := make(map[uint32]bool)
-	missingChunks := make([]uint32, 0)
-
-	// 受信開始の合図を送信
+	// Step 4: 受信開始の合図を送信
 	startData := BaseData{
 		Type: Message,
 		Data: map[string]interface{}{"action": "start_transfer"},
 	}
-	raw, _ = json.Marshal(startData)
-	handle.Self.Conn.WriteToUDP(raw, &net.UDPAddr{
+	raw, err = json.Marshal(startData)
+	if err != nil {
+		return fmt.Errorf("failed to marshal start signal: %v", err)
+	}
+
+	_, err = handle.Self.Conn.WriteToUDP(raw, &net.UDPAddr{
 		IP:   handle.Peer.Addr.Ip,
 		Port: handle.Peer.Addr.Port,
 	})
+	if err != nil {
+		return fmt.Errorf("failed to send start signal: %v", err)
+	}
 
-	logrus.Info("Receiving file chunks...")
+	logrus.Info("Sent start transfer signal, receiving file chunks...")
+
+	// Step 5: チャンク受信ループ
+	receivedChunks := make(map[uint32]bool)
+	missingChunks := make([]uint32, 0)
 
 	// タイムアウト設定
 	handle.Self.Conn.SetReadDeadline(time.Now().Add(time.Second * TimeoutSeconds))
@@ -473,7 +474,7 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 		logrus.Debugf("Received chunk %d/%d", len(receivedChunks), indexData.ChunkCount)
 	}
 
-	// Step 5: 欠落チャンクの確認と再送要求
+	// Step 6: 欠落チャンクの確認と再送要求
 	for i := uint32(0); i < indexData.ChunkCount; i++ {
 		if !receivedChunks[i] {
 			missingChunks = append(missingChunks, i)
@@ -543,7 +544,7 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 		retryCount++
 	}
 
-	// Step 6: ファイル整合性チェック
+	// Step 7: ファイル整合性チェック
 	file.Close()
 	receivedHash, err := calculateFileHash(outputPath)
 	if err != nil {
@@ -568,7 +569,7 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 		return fmt.Errorf("file hash mismatch - expected: %s, got: %s", indexData.FileHash, receivedHash)
 	}
 
-	// Step 7: 終了パケット送信（成功）
+	// Step 8: 終了パケット送信（成功）
 	finishData := BaseData{
 		Type: Message,
 		Data: FinishPacketData{
@@ -892,12 +893,13 @@ func TraySync(self *SelfCfg, peer *PeerCfg, defaultTray string) error {
 	return nil
 }
 
-func receiveFromPeer(self *SelfCfg, peer *PeerCfg) (*BaseData, error) {
+func receiveFromPeer(self *SelfCfg, peer *PeerCfg) (BaseData, error) {
 	buf := make([]byte, 1024)
 	for {
 		n, peerAddr, err := self.Conn.ReadFromUDP(buf)
 		if err != nil {
-			return nil, err
+			logrus.Debug(err)
+			continue
 		}
 
 		if peerAddr.IP.String() != peer.Addr.Ip.String() || peerAddr.Port != peer.Addr.Port {
@@ -907,10 +909,12 @@ func receiveFromPeer(self *SelfCfg, peer *PeerCfg) (*BaseData, error) {
 		var meta BaseData
 		err = json.Unmarshal(buf[:n], &meta)
 		if err != nil {
-			return nil, err
+			return BaseData{}, err
 		}
 
-		return &meta, nil
+		logrus.Debug("<<< receiveFromPeer: about to RETURN")
+		fmt.Println("ちんちん")
+		return meta, nil
 	}
 }
 
@@ -1077,4 +1081,7 @@ func ConvertMapToAuthMeta(input any) (*tray.AuthMeta, error) {
 		return nil, err
 	}
 	return &meta, nil
+}
+func (a *Address) StrAddr() string {
+	return a.Ip.String() + ":" + strconv.Itoa(a.Port)
 }
