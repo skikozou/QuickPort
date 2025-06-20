@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/crc32"
-	"hash/fnv"
 	"net"
 	"os"
 	"path/filepath"
@@ -17,133 +16,6 @@ import (
 	"github.com/pion/stun"
 	"github.com/sirupsen/logrus"
 )
-
-func (h *Handle) Receiver(pause <-chan bool) {
-	var pauseflag bool = false
-
-	for {
-		select {
-		case p := <-pause:
-			logrus.Info("sig きた")
-			pauseflag = p
-		default:
-			if pauseflag {
-				time.Sleep(100 * time.Millisecond)
-				logrus.Info("ぱうすなう")
-				continue
-			}
-
-			h.Self.Conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
-			basedata, err := receiveFromPeer(h.Self, h.Peer)
-			if err != nil {
-				// net.Error型の場合のタイムアウトチェックを追加
-				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-					continue // タイムアウトは正常なので continue
-				}
-				logrus.Debugf("Receiver Error: %s", err)
-				continue
-			}
-
-			logrus.Info("ぱけっつきた")
-
-			switch basedata.Type {
-			case FileReqest:
-				filereq, err := ConvertMapToFileReqMeta(basedata.Data)
-				if err != nil {
-					logrus.Errorf("Decode Error: %s", err)
-					continue
-				}
-
-				err = SendFile(h, filereq.FilePath)
-				if err != nil {
-					logrus.Error(err)
-				}
-				//process
-				//<-send index
-				//->data req
-				//<-file data
-				//->missing packet list
-				//<-send missing packet
-				// ~~~~
-				//->finish packet
-			case Message:
-
-			}
-		}
-	}
-}
-
-func calculateFileHash(path string) (string, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-
-	h := fnv.New32a()
-	h.Write([]byte(raw))
-	return strconv.FormatUint(uint64(h.Sum32()), 10), nil
-}
-
-func receiveFileIndex(handle *Handle) (*FileIndexData, error) {
-	//logrus.Debug(receiveFromPeer(handle.Self, handle.Peer))
-	for {
-		meta, err := receiveFromPeer(handle.Self, handle.Peer)
-		if err != nil {
-			return nil, err
-		}
-
-		if meta.Type != FileIndex {
-			logrus.Debugf("Ignoring packet type: %d, waiting for FileIndex", meta.Type) // ←ログレベルを修正
-			continue
-		}
-
-		bytes, err := json.Marshal(meta.Data)
-		if err != nil {
-			return nil, err
-		}
-
-		var indexData FileIndexData
-		err = json.Unmarshal(bytes, &indexData)
-		if err != nil {
-			return nil, err
-		}
-
-		return &indexData, nil
-	}
-}
-
-// receiveFileChunk receives file chunk using custom protocol
-func receiveFileChunk(conn *net.UDPConn) (*FileChunk, error) {
-	buf := make([]byte, ChunkSize+16) // チャンクサイズ + ヘッダー
-
-	n, _, err := conn.ReadFromUDP(buf)
-	if err != nil {
-		return nil, err
-	}
-
-	if n < 12 { // 最小ヘッダーサイズ
-		return nil, fmt.Errorf("packet too small: %d bytes", n)
-	}
-
-	// カスタムプロトコルのパース
-	// [Index:4][Length:4][Checksum:4][Data:Length]
-	index := binary.LittleEndian.Uint32(buf[0:4])
-	length := binary.LittleEndian.Uint32(buf[4:8])
-	checksum := binary.LittleEndian.Uint32(buf[8:12])
-
-	if n < int(12+length) {
-		return nil, fmt.Errorf("incomplete chunk: expected %d bytes, got %d", 12+length, n)
-	}
-
-	data := buf[12 : 12+length]
-
-	return &FileChunk{
-		Index:    index,
-		Length:   length,
-		Checksum: checksum,
-		Data:     data,
-	}, nil
-}
 
 func SendFile(handle *Handle, path string) error {
 	// Step 1: ファイルの存在確認とメタデータ取得
@@ -887,13 +759,17 @@ func TraySync(self *SelfCfg, peer *PeerCfg, defaultTray string) error {
 	return nil
 }
 
-func receiveFromPeer(self *SelfCfg, peer *PeerCfg) (BaseData, error) {
+func receiveFromPeer(self *SelfCfg, peer *PeerCfg) (*BaseData, error) {
 	buf := make([]byte, 1024)
+
 	for {
 		n, peerAddr, err := self.Conn.ReadFromUDP(buf)
 		if err != nil {
-			//logrus.Debug(err)
-			continue
+			if n == 0 && peerAddr == nil {
+				continue
+			}
+
+			return nil, fmt.Errorf("receiver error")
 		}
 
 		if peerAddr.IP.String() != peer.Addr.Ip.String() || peerAddr.Port != peer.Addr.Port {
@@ -903,10 +779,10 @@ func receiveFromPeer(self *SelfCfg, peer *PeerCfg) (BaseData, error) {
 		var meta BaseData
 		err = json.Unmarshal(buf[:n], &meta)
 		if err != nil {
-			return BaseData{}, err
+			return nil, err
 		}
 
-		return meta, nil
+		return &meta, nil
 	}
 }
 

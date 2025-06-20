@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-func Run(handle *core.Handle, pause chan<- bool) (*core.Handle, error) {
+func Run(handle *core.Handle, pause chan bool) (*core.Handle, error) {
 	tty, err := utils.UseTty()
 	if err != nil {
 		return nil, err

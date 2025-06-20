@@ -7,7 +7,7 @@ import (
 )
 
 type dataType int
-type Event int
+type ReceiverMode int
 
 const (
 	SyncTray dataType = iota
@@ -19,7 +19,9 @@ const (
 )
 
 const (
-	InvokeShell Event = iota
+	FileJSON ReceiverMode = iota
+	FileTransfer
+	Receiver
 )
 
 const (
