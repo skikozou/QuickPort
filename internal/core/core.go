@@ -18,36 +18,54 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-func Reciever(handle *Handle) {
-	for {
-		basedata, err := receiveFromPeer(handle.Self, handle.Peer)
-		if err != nil {
-			logrus.Debugf("Reciever Error: %s", err)
-			continue
-		}
+func (h *Handle) Receiver(pause <-chan bool) {
+	var pauseflag bool = false
 
-		switch basedata.Type {
-		case FileReqest:
-			filereq, err := ConvertMapToFileReqMeta(basedata.Data)
-			if err != nil {
-				logrus.Errorf("Decode Error: %s", err)
+	for {
+		select {
+		case p := <-pause:
+			if p {
+				pauseflag = true
+			} else {
+				pauseflag = false
+			}
+		default:
+			if pauseflag {
+				//pause
 				continue
 			}
 
-			err = SendFile(handle, filereq.FilePath)
+			h.Self.Conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+			basedata, err := receiveFromPeer(h.Self, h.Peer)
+			logrus.Debug("packet arrived")
 			if err != nil {
-				logrus.Error(err)
+				logrus.Debugf("Receiver Error: %s", err)
+				continue
 			}
-			//process
-			//<-send index
-			//->data req
-			//<-file data
-			//->missing packet list
-			//<-send missing packet
-			// ~~~~
-			//->finish packet
-		case Message:
 
+			switch basedata.Type {
+			case FileReqest:
+				filereq, err := ConvertMapToFileReqMeta(basedata.Data)
+				if err != nil {
+					logrus.Errorf("Decode Error: %s", err)
+					continue
+				}
+
+				err = SendFile(h, filereq.FilePath)
+				if err != nil {
+					logrus.Error(err)
+				}
+				//process
+				//<-send index
+				//->data req
+				//<-file data
+				//->missing packet list
+				//<-send missing packet
+				// ~~~~
+				//->finish packet
+			case Message:
+
+			}
 		}
 	}
 }
@@ -64,12 +82,12 @@ func calculateFileHash(path string) (string, error) {
 }
 
 func receiveFileIndex(handle *Handle) (*FileIndexData, error) {
+	//logrus.Debug(receiveFromPeer(handle.Self, handle.Peer))
 	for {
 		meta, err := receiveFromPeer(handle.Self, handle.Peer)
 		if err != nil {
 			return nil, err
 		}
-		fmt.Println("geasg") //こいつがでない！！！！！！！！！！！！！！！！！！！！！！！！！
 
 		if meta.Type != FileIndex {
 			logrus.Debugf("Ignoring packet type: %d, waiting for FileIndex", meta.Type) // ←ログレベルを修正
@@ -898,7 +916,7 @@ func receiveFromPeer(self *SelfCfg, peer *PeerCfg) (BaseData, error) {
 	for {
 		n, peerAddr, err := self.Conn.ReadFromUDP(buf)
 		if err != nil {
-			logrus.Debug(err)
+			//logrus.Debug(err)
 			continue
 		}
 
@@ -912,8 +930,6 @@ func receiveFromPeer(self *SelfCfg, peer *PeerCfg) (BaseData, error) {
 			return BaseData{}, err
 		}
 
-		logrus.Debug("<<< receiveFromPeer: about to RETURN")
-		fmt.Println("ちんちん")
 		return meta, nil
 	}
 }

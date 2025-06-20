@@ -83,11 +83,12 @@ func main() {
 
 	fmt.Printf("%s:%d <==> %s:%d\n", handle.Self.LocalAddr.Ip.String(), handle.Self.LocalAddr.Port, handle.Peer.Addr.Ip.String(), handle.Peer.Addr.Port)
 
-	//main reciever
-	go core.Reciever(handle)
+	//main Receiver
+	var pause chan bool
+	go handle.Receiver(pause)
 
 	//shell
-	handle, err = shell.Run(handle)
+	handle, err = shell.Run(handle, pause)
 	if err != nil {
 		logrus.Error(err)
 		return

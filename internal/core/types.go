@@ -1,6 +1,10 @@
 package core
 
-import "net"
+import (
+	"context"
+	"net"
+	"sync"
+)
 
 type dataType int
 type Event int
@@ -23,6 +27,12 @@ const (
 	MaxRetries     = 3
 	TimeoutSeconds = 30
 )
+
+type ReceiverController struct {
+	Cancel context.CancelFunc
+	Active bool
+	Mu     sync.Mutex
+}
 
 type FileChunk struct {
 	Index    uint32 // チャンクインデックス
