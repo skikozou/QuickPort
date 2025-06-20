@@ -24,24 +24,27 @@ func (h *Handle) Receiver(pause <-chan bool) {
 	for {
 		select {
 		case p := <-pause:
-			if p {
-				pauseflag = true
-			} else {
-				pauseflag = false
-			}
+			logrus.Info("sig きた")
+			pauseflag = p
 		default:
 			if pauseflag {
-				//pause
+				time.Sleep(100 * time.Millisecond)
+				logrus.Info("ぱうすなう")
 				continue
 			}
 
 			h.Self.Conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 			basedata, err := receiveFromPeer(h.Self, h.Peer)
-			logrus.Debug("packet arrived")
 			if err != nil {
+				// net.Error型の場合のタイムアウトチェックを追加
+				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+					continue // タイムアウトは正常なので continue
+				}
 				logrus.Debugf("Receiver Error: %s", err)
 				continue
 			}
+
+			logrus.Info("ぱけっつきた")
 
 			switch basedata.Type {
 			case FileReqest:
@@ -402,15 +405,7 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 		},
 	}
 
-	raw, err := json.Marshal(reqData)
-	if err != nil {
-		return fmt.Errorf("failed to marshal request: %v", err)
-	}
-
-	_, err = handle.Self.Conn.WriteToUDP(raw, &net.UDPAddr{
-		IP:   handle.Peer.Addr.Ip,
-		Port: handle.Peer.Addr.Port,
-	})
+	err := Write(handle.Self.Conn, handle.Peer.Addr.StrAddr(), &reqData)
 	if err != nil {
 		return fmt.Errorf("failed to send request: %v", err)
 	}
@@ -442,17 +437,9 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 		Type: Message,
 		Data: map[string]interface{}{"action": "start_transfer"},
 	}
-	raw, err = json.Marshal(startData)
+	err = Write(handle.Self.Conn, handle.Peer.Addr.StrAddr(), &startData)
 	if err != nil {
-		return fmt.Errorf("failed to marshal start signal: %v", err)
-	}
-
-	_, err = handle.Self.Conn.WriteToUDP(raw, &net.UDPAddr{
-		IP:   handle.Peer.Addr.Ip,
-		Port: handle.Peer.Addr.Port,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to send start signal: %v", err)
+		return fmt.Errorf("failed to send request: %v", err)
 	}
 
 	logrus.Info("Sent start transfer signal, receiving file chunks...")
@@ -511,17 +498,9 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 			},
 		}
 
-		raw, err := json.Marshal(missingData)
+		err = Write(handle.Self.Conn, handle.Peer.Addr.StrAddr(), &missingData)
 		if err != nil {
-			return fmt.Errorf("failed to marshal missing chunks: %v", err)
-		}
-
-		_, err = handle.Self.Conn.WriteToUDP(raw, &net.UDPAddr{
-			IP:   handle.Peer.Addr.Ip,
-			Port: handle.Peer.Addr.Port,
-		})
-		if err != nil {
-			return fmt.Errorf("failed to send missing chunks request: %v", err)
+			return fmt.Errorf("failed to send request: %v", err)
 		}
 
 		// 欠落チャンクの受信
@@ -578,11 +557,11 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 				Message: "File hash mismatch",
 			},
 		}
-		raw, _ = json.Marshal(finishData)
-		handle.Self.Conn.WriteToUDP(raw, &net.UDPAddr{
-			IP:   handle.Peer.Addr.Ip,
-			Port: handle.Peer.Addr.Port,
-		})
+
+		err = Write(handle.Self.Conn, handle.Peer.Addr.StrAddr(), &finishData)
+		if err != nil {
+			return fmt.Errorf("failed to send request: %v", err)
+		}
 
 		return fmt.Errorf("file hash mismatch - expected: %s, got: %s", indexData.FileHash, receivedHash)
 	}
@@ -596,12 +575,9 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 		},
 	}
 
-	raw, err = json.Marshal(finishData)
-	if err == nil {
-		handle.Self.Conn.WriteToUDP(raw, &net.UDPAddr{
-			IP:   handle.Peer.Addr.Ip,
-			Port: handle.Peer.Addr.Port,
-		})
+	err = Write(handle.Self.Conn, handle.Peer.Addr.StrAddr(), &finishData)
+	if err != nil {
+		return fmt.Errorf("failed to send request: %v", err)
 	}
 
 	logrus.Infof("File downloaded successfully: %s", outputPath)

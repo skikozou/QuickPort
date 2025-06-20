@@ -19,6 +19,12 @@ func Run(handle *core.Handle, pause chan<- bool) (*core.Handle, error) {
 		if err != nil {
 			return handle, err
 		}
+
+		cmd = strings.TrimSpace(cmd)
+		if cmd == "" {
+			continue
+		}
+
 		args := core.ShellArgs{
 			Arg:    strings.Split(cmd, " "),
 			Handle: handle,
