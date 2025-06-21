@@ -1,6 +1,7 @@
 package core
 
 import (
+	"QuickPort/tray"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -14,6 +15,8 @@ import (
 )
 
 //独自パケット、json、shell、コマンドでモード分け
+//一括レシーバーを作り、chanに受信したのを入れ
+//指定した条件に一致の時chanでこっちに値を流す(jsonにできるか、byteのヘッダーが規定通りか、で判断)
 
 func (h *Handle) NewReceiver(buf chan []byte) {
 	for {
@@ -76,6 +79,69 @@ func (h *Handle) ReceiverOld() {
 			//->finish packet
 		case Message:
 
+		}
+	}
+}
+
+func (h *Handle) ClaudeReceiver(pause <-chan bool) {
+	var pauseflag bool = false
+	logrus.Info("Receiver started")
+
+	for {
+		select {
+		case p := <-pause:
+			pauseflag = p
+			logrus.Infof("Receiver pause state changed: %v", pauseflag)
+		default:
+			// より長いタイムアウトを設定（通常の処理用）
+			timeout := time.Second * 5
+			if pauseflag {
+				// pause中は短いタイムアウトでFileRequestのみチェック
+				timeout = time.Millisecond * 500
+			}
+
+			h.Self.Conn.SetReadDeadline(time.Now().Add(timeout))
+			basedata, err := receiveFromPeer(h.Self, h.Peer)
+
+			if err != nil {
+				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+					// タイムアウトは正常、continue
+					continue
+				}
+				logrus.Debugf("Receiver Error: %s", err)
+				continue
+			}
+
+			logrus.Debugf("Received packet type: %v", basedata.Type)
+
+			switch basedata.Type {
+			case FileReqest:
+				logrus.Info("Received FileRequest")
+				filereq, err := ConvertMapToFileReqMeta(basedata.Data)
+				if err != nil {
+					logrus.Errorf("Failed to decode FileRequest: %s", err)
+					continue
+				}
+
+				logrus.Infof("Processing file request for: %s", filereq.FilePath)
+				err = SendFile(h, filereq.FilePath)
+				if err != nil {
+					logrus.Errorf("Failed to send file: %s", err)
+				} else {
+					logrus.Info("File sent successfully")
+				}
+
+			case Message:
+				if !pauseflag {
+					logrus.Debug("Received Message packet")
+					// メッセージ処理（pause中でない場合のみ）
+				}
+
+			default:
+				if !pauseflag {
+					logrus.Debugf("Received unhandled packet type: %v", basedata.Type)
+				}
+			}
 		}
 	}
 }
@@ -193,4 +259,70 @@ func receiveFileChunk(conn *net.UDPConn) (*FileChunk, error) {
 		Checksum: checksum,
 		Data:     data,
 	}, nil
+}
+
+func TrayReceive(self *SelfCfg, peer *PeerCfg) (*[]tray.FileMeta, error) {
+	logrus.Debug("Waiting for tray data from peer...")
+
+	meta, err := receiveFromPeer(self, peer)
+	if err != nil {
+		logrus.Error("Failed to receive from peer:", err)
+		return nil, err
+	}
+
+	if meta.Type != SyncTray {
+		logrus.Error("Invalid packet type, expected SyncTray")
+		return nil, fmt.Errorf("invalid packet type: %d", meta.Type)
+	}
+
+	logrus.Debug("Received tray sync packet")
+	return ConvertMapToFileMeta(meta.Data)
+}
+
+func ReceiveSync(conn *net.UDPConn) (*BaseData, error) {
+	buf := make([]byte, 1024)
+	for {
+		n, _, err := conn.ReadFromUDP(buf)
+		if err != nil {
+			continue
+		}
+
+		var meta BaseData
+		err = json.Unmarshal(buf[:n], &meta)
+		if err != nil {
+			logrus.Fatal(err)
+			return nil, err
+		}
+
+		if meta.Type != SyncTray {
+			continue
+		}
+
+		//Read(&meta)
+		//ConvertMapToFileMeta()
+
+		return &meta, nil
+	}
+}
+
+// 受信処理
+func ReceiveLoop(conn *net.UDPConn) {
+	buf := make([]byte, 1024*1024)
+	for {
+		n, addr, err := conn.ReadFromUDP(buf)
+		if err != nil {
+			logrus.Errorln("Read error:", err)
+			continue
+		}
+		logrus.Infof("Received from %s", addr.String())
+
+		var meta BaseData
+		err = json.Unmarshal(buf[:n], &meta)
+		if err != nil {
+			logrus.Fatal(err)
+			return
+		}
+
+		ConvertMapToFileMeta(meta.Data)
+	}
 }
