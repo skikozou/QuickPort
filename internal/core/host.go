@@ -11,7 +11,7 @@ import (
 
 func Host() (*Handle, error) {
 	// トークン生成側（サーバー側）
-	self, err := PortSetUp()
+	self, err := SetupPort()
 	if err != nil {
 		return nil, err
 	}
@@ -36,7 +36,7 @@ func Host() (*Handle, error) {
 
 	// 相手のトレイを受信
 	logrus.Info("Waiting for peer's tray...")
-	tray, err := TrayReceive(self, peer)
+	tray, err := ReceiveTray(self, peer)
 	if err != nil {
 		return nil, err
 	}

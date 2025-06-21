@@ -70,10 +70,15 @@ func main() {
 			return
 		}
 
-		handle, err = core.Client()
-		if err != nil {
-			logrus.Error(err)
-			return
+		for {
+			handle, err = core.Client()
+			if err != nil {
+				logrus.Error(err)
+				logrus.Info("Restart Setup")
+				continue
+			}
+
+			break
 		}
 
 	case utils.DebugLevel:

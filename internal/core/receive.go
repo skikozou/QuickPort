@@ -28,7 +28,7 @@ func (h *Handle) NewReceiver(buf chan []byte) {
 
 		switch basedata.Type {
 		case FileReqest:
-			filereq, err := ConvertMapToFileReqMeta(basedata.Data)
+			filereq, err := ConvertMapToFileReqestMeta(basedata.Data)
 			if err != nil {
 				logrus.Errorf("Decode Error: %s", err)
 				continue
@@ -59,7 +59,7 @@ func (h *Handle) ReceiverOld() {
 
 		switch basedata.Type {
 		case FileReqest:
-			filereq, err := ConvertMapToFileReqMeta(basedata.Data)
+			filereq, err := ConvertMapToFileReqestMeta(basedata.Data)
 			if err != nil {
 				logrus.Errorf("Decode Error: %s", err)
 				continue
@@ -84,18 +84,18 @@ func (h *Handle) ReceiverOld() {
 }
 
 func (h *Handle) ClaudeReceiver(pause <-chan bool) {
-	var pauseflag bool = false
+	var isPaused bool = false
 	logrus.Info("Receiver started")
 
 	for {
 		select {
 		case p := <-pause:
-			pauseflag = p
-			logrus.Infof("Receiver pause state changed: %v", pauseflag)
+			isPaused = p
+			logrus.Infof("Receiver pause state changed: %v", isPaused)
 		default:
 			// より長いタイムアウトを設定（通常の処理用）
 			timeout := time.Second * 5
-			if pauseflag {
+			if isPaused {
 				// pause中は短いタイムアウトでFileRequestのみチェック
 				timeout = time.Millisecond * 500
 			}
@@ -117,7 +117,7 @@ func (h *Handle) ClaudeReceiver(pause <-chan bool) {
 			switch basedata.Type {
 			case FileReqest:
 				logrus.Info("Received FileRequest")
-				filereq, err := ConvertMapToFileReqMeta(basedata.Data)
+				filereq, err := ConvertMapToFileReqestMeta(basedata.Data)
 				if err != nil {
 					logrus.Errorf("Failed to decode FileRequest: %s", err)
 					continue
@@ -132,13 +132,13 @@ func (h *Handle) ClaudeReceiver(pause <-chan bool) {
 				}
 
 			case Message:
-				if !pauseflag {
+				if !isPaused {
 					logrus.Debug("Received Message packet")
 					// メッセージ処理（pause中でない場合のみ）
 				}
 
 			default:
-				if !pauseflag {
+				if !isPaused {
 					logrus.Debugf("Received unhandled packet type: %v", basedata.Type)
 				}
 			}
@@ -172,7 +172,7 @@ func (h *Handle) Receiver(pause <-chan bool) {
 			switch basedata.Type {
 			case FileReqest:
 				// FileRequestが来たらpauseを無視してSendFileを実行
-				filereq, err := ConvertMapToFileReqMeta(basedata.Data)
+				filereq, err := ConvertMapToFileReqestMeta(basedata.Data)
 				if err != nil {
 					logrus.Errorf("Decode Error: %s", err)
 					continue
@@ -261,7 +261,7 @@ func receiveFileChunk(conn *net.UDPConn) (*FileChunk, error) {
 	}, nil
 }
 
-func TrayReceive(self *SelfCfg, peer *PeerCfg) (*[]tray.FileMeta, error) {
+func ReceiveTray(self *SelfConfig, peer *PeerConfig) (*[]tray.FileMeta, error) {
 	logrus.Debug("Waiting for tray data from peer...")
 
 	meta, err := receiveFromPeer(self, peer)
@@ -284,6 +284,7 @@ func ReceiveSync(conn *net.UDPConn) (*BaseData, error) {
 	for {
 		n, _, err := conn.ReadFromUDP(buf)
 		if err != nil {
+			logrus.Debug(err)
 			continue
 		}
 
@@ -295,6 +296,7 @@ func ReceiveSync(conn *net.UDPConn) (*BaseData, error) {
 		}
 
 		if meta.Type != SyncTray {
+			logrus.Debug("is not Tray Sync")
 			continue
 		}
 

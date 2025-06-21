@@ -17,26 +17,32 @@ func Client() (*Handle, error) {
 		return nil, err
 	}
 
-	fmt.Print("Enter token: ")
-	token, err := tty.ReadString()
-	if err != nil {
-		return nil, err
+	cfg := &PeerConfig{}
+	for {
+		fmt.Print("Enter token: ")
+		token, err := tty.ReadString()
+		if err != nil {
+			return nil, err
+		}
+
+		cfg, err = ParseToken(token)
+		if err != nil {
+			logrus.Info("\ninvaid token")
+			continue
+		}
+
+		break
 	}
 
-	data, err := ParseToken(token)
-	if err != nil {
-		return nil, err
-	}
+	fmt.Println("Connecting to:", cfg.Name, cfg.Addr.Ip, cfg.Addr.Port)
 
-	fmt.Println("Connecting to:", data.Name, data.Addr.Ip, data.Addr.Port)
-
-	self, err := PortSetUp()
+	self, err := SetupPort()
 	if err != nil {
 		return nil, err
 	}
 
 	// 接続試行
-	peer, err := Sync(self, data)
+	peer, err := Sync(self, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -48,7 +54,7 @@ func Client() (*Handle, error) {
 
 	// まず相手のトレイを受信
 	logrus.Info("Waiting for peer's tray...")
-	peertray, err := TrayReceive(self, peer)
+	peertray, err := ReceiveTray(self, peer)
 	if err != nil {
 		return nil, err
 	}

@@ -24,7 +24,7 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 	logrus.Infof("Requesting file: %s", filePath)
 	reqData := BaseData{
 		Type: FileReqest,
-		Data: FileReqData{
+		Data: fileRequestData{
 			FilePath: filePath,
 		},
 	}
