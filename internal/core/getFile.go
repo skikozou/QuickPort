@@ -61,7 +61,7 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 		Type: Message,
 		Data: map[string]interface{}{"action": "start_transfer"},
 	}
-	err = Write(handle.Self.Conn, handle.Peer.Addr.StrAddr(), &startData)
+	err = Write(handle.Self.SubConn, handle.Peer.SubAddr.StrAddr(), &startData)
 	if err != nil {
 		return fmt.Errorf("failed to send request: %v", err)
 	}
@@ -73,10 +73,10 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 	missingChunks := make([]uint32, 0)
 
 	// タイムアウト設定
-	handle.Self.Conn.SetReadDeadline(time.Now().Add(time.Second * TimeoutSeconds))
+	handle.Self.SubConn.SetReadDeadline(time.Now().Add(time.Second * TimeoutSeconds))
 
 	for len(receivedChunks) < int(indexData.ChunkCount) {
-		chunk, err := receiveFileChunk(handle.Self.Conn)
+		chunk, err := receiveFileChunk(handle.Self.SubConn)
 		if err != nil {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 				logrus.Warn("Timeout occurred, requesting missing chunks...")
@@ -122,16 +122,16 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 			},
 		}
 
-		err = Write(handle.Self.Conn, handle.Peer.Addr.StrAddr(), &missingData)
+		err = Write(handle.Self.SubConn, handle.Peer.SubAddr.StrAddr(), &missingData)
 		if err != nil {
 			return fmt.Errorf("failed to send request: %v", err)
 		}
 
 		// 欠落チャンクの受信
-		handle.Self.Conn.SetReadDeadline(time.Now().Add(time.Second * TimeoutSeconds))
+		handle.Self.SubConn.SetReadDeadline(time.Now().Add(time.Second * TimeoutSeconds))
 
 		for len(missingChunks) > 0 {
-			chunk, err := receiveFileChunk(handle.Self.Conn)
+			chunk, err := receiveFileChunk(handle.Self.SubConn)
 			if err != nil {
 				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 					break
@@ -182,7 +182,7 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 			},
 		}
 
-		err = Write(handle.Self.Conn, handle.Peer.Addr.StrAddr(), &finishData)
+		err = Write(handle.Self.SubConn, handle.Peer.SubAddr.StrAddr(), &finishData)
 		if err != nil {
 			return fmt.Errorf("failed to send request: %v", err)
 		}
@@ -199,7 +199,7 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 		},
 	}
 
-	err = Write(handle.Self.Conn, handle.Peer.Addr.StrAddr(), &finishData)
+	err = Write(handle.Self.SubConn, handle.Peer.SubAddr.StrAddr(), &finishData)
 	if err != nil {
 		return fmt.Errorf("failed to send request: %v", err)
 	}

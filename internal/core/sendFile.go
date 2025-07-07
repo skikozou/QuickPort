@@ -12,18 +12,18 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-func SendFile(handle *Handle, path string) error {
+func SendFile(handle *Handle, filereq *fileRequestData) error {
 	// Step 1: ファイルの存在確認とメタデータ取得
-	fullpath := tray.UseTray() + filepath.Clean(path)
+	fullpath := tray.UseTray() + filepath.Clean(filereq.FilePath)
 	fileInfo, err := os.Stat(fullpath)
 	logrus.Debugf("fileinfo: %v", fileInfo)
 	if err != nil {
-		logrus.Errorf("File not found: %s", path)
+		logrus.Errorf("File not found: %s", filereq.FilePath)
 		return fmt.Errorf("file not found: %v", err)
 	}
 
 	if fileInfo.IsDir() {
-		return fmt.Errorf("path is a directory, not a file: %s", path)
+		return fmt.Errorf("path is a directory, not a file: %s", filereq.FilePath)
 	}
 
 	// Step 2: ファイルハッシュ計算
@@ -41,7 +41,7 @@ func SendFile(handle *Handle, path string) error {
 	indexData := BaseData{
 		Type: FileIndex,
 		Data: FileIndexData{
-			FilePath:   path,
+			FilePath:   filereq.FilePath,
 			TotalSize:  fileInfo.Size(),
 			ChunkCount: chunkCount,
 			FileHash:   fileHash,
@@ -49,7 +49,7 @@ func SendFile(handle *Handle, path string) error {
 		},
 	}
 
-	err = Write(handle.Self.Conn, handle.Peer.Addr.StrAddr(), &indexData)
+	err = Write(handle.Self.SubConn, handle.Peer.SubAddr.StrAddr(), &indexData)
 
 	if err != nil {
 		return fmt.Errorf("failed to send file index: %v", err)
@@ -60,7 +60,7 @@ func SendFile(handle *Handle, path string) error {
 	// Step 5: 転送開始信号を待機
 	logrus.Info("Waiting for transfer start signal...")
 	for {
-		meta, err := receiveFromPeer(handle.Self, handle.Peer)
+		meta, err := receiveFromPeer(handle.Self, handle.Peer, true)
 		if err != nil {
 			return fmt.Errorf("failed to receive start signal: %v", err)
 		}
@@ -94,7 +94,7 @@ func SendFile(handle *Handle, path string) error {
 		// 欠落チャンクリストまたは終了パケットを待機
 		logrus.Debug("Waiting for missing chunks request or finish packet...")
 
-		meta, err := receiveFromPeer(handle.Self, handle.Peer)
+		meta, err := receiveFromPeer(handle.Self, handle.Peer, true)
 		if err != nil {
 			return fmt.Errorf("failed to receive response: %v", err)
 		}
@@ -218,9 +218,9 @@ func sendSingleChunk(handle *Handle, index uint32, data []byte) error {
 	copy(packet[12:], data)
 
 	// UDP送信
-	_, err := handle.Self.Conn.WriteToUDP(packet, &net.UDPAddr{
-		IP:   handle.Peer.Addr.Ip,
-		Port: handle.Peer.Addr.Port,
+	_, err := handle.Self.SubConn.WriteToUDP(packet, &net.UDPAddr{
+		IP:   handle.Peer.SubAddr.Ip,
+		Port: handle.Peer.SubAddr.Port,
 	})
 
 	return err

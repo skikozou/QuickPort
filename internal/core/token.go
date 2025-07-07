@@ -7,8 +7,8 @@ import (
 )
 
 func GenToken(self *SelfConfig) string {
-	ip := string(self.LocalAddr.Ip)
-	port := strconv.Itoa(self.LocalAddr.Port)
+	ip := string(self.Addr.Ip)
+	port := strconv.Itoa(self.Addr.Port)
 	name := self.Name
 
 	raw := strings.Join([]string{ip, port, name}, ":")

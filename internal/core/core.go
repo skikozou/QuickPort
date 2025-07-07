@@ -24,17 +24,31 @@ func SetupPort() (*SelfConfig, error) {
 		return nil, err
 	}
 
-	self.LocalAddr, err = GetLocalAddr()
+	self.Addr, err = GetLocalAddr()
 	if err != nil {
 		logrus.Warn("Primary IP detection failed, trying alternative method")
 		ip, altErr := GetLocalIPAlternative()
 		if altErr != nil {
 			return nil, fmt.Errorf("failed to get local IP: %v (alternative: %v)", err, altErr)
 		}
-		self.LocalAddr = &Address{
+		self.Addr = &Address{
 			Ip:   ip,
 			Port: utils.GetPort(),
 		}
+	}
+
+	self.Conn, err = ListenUDP(self.Addr.Port)
+	if err != nil {
+		return nil, err
+	}
+
+	self.SubAddr = &Address{
+		Ip:   self.Addr.Ip,
+		Port: utils.GetPort(),
+	}
+	self.SubConn, err = ListenUDP(self.SubAddr.Port)
+	if err != nil {
+		return nil, err
 	}
 
 	return &self, err
@@ -42,22 +56,15 @@ func SetupPort() (*SelfConfig, error) {
 
 // Sync 関数を改善
 func Sync(self *SelfConfig, peer *PeerConfig) (*PeerConfig, error) {
-	port := utils.GetPort()
-	conn, err := ListenUDP(port)
-	if err != nil {
-		return nil, err
-	}
-
-	self.Conn = conn
-	logrus.Infof("Listening on %s:%d", self.LocalAddr.Ip.String(), port)
+	logrus.Infof("Listening on %s:%d", self.Addr.Ip.String(), self.Addr.Port)
 
 	// 認証リクエスト送信
 	addr := fmt.Sprintf("%s:%d", peer.Addr.Ip.String(), peer.Addr.Port)
 	logrus.Debug("Sending auth request to:", addr)
 
-	err = Write(conn, addr, &BaseData{
+	err := Write(self.Conn, addr, &BaseData{
 		Type: Auth,
-		Data: tray.AuthMeta{Name: self.Name, Flag: tray.AccessReq},
+		Data: tray.AuthMeta{Name: self.Name, SubPort: self.SubAddr.Port, Flag: tray.AccessReq},
 	})
 	if err != nil {
 		logrus.Error("Failed to send auth request:", err)
@@ -66,7 +73,7 @@ func Sync(self *SelfConfig, peer *PeerConfig) (*PeerConfig, error) {
 
 	// 認証レスポンス受信
 	logrus.Debug("Waiting for auth response...")
-	meta, err := receiveFromPeer(self, peer)
+	meta, err := receiveFromPeer(self, peer, false)
 	if err != nil {
 		logrus.Error("Failed to receive auth response:", err)
 		return nil, err
@@ -88,6 +95,10 @@ func Sync(self *SelfConfig, peer *PeerConfig) (*PeerConfig, error) {
 		return nil, fmt.Errorf("invalid packet - received request instead of response")
 	case tray.Allow:
 		logrus.Info("Connection accepted!")
+		peer.SubAddr = &Address{
+			Ip:   peer.Addr.Ip,
+			Port: authmeta.SubPort,
+		}
 	case tray.Deny:
 		logrus.Info("Connection denied by peer")
 		return nil, nil
@@ -98,21 +109,12 @@ func Sync(self *SelfConfig, peer *PeerConfig) (*PeerConfig, error) {
 
 // SyncListener 関数を改善
 func SyncListener(self *SelfConfig) (*PeerConfig, error) {
-	port := utils.GetPort()
-	conn, err := ListenUDP(port)
-	if err != nil {
-		return nil, err
-	}
-
-	self.Conn = conn
-	self.LocalAddr.Port = port
-
-	logrus.Infof("Listening on %s:%d", self.LocalAddr.Ip.String(), port)
+	logrus.Infof("Listening on %s:%d", self.Addr.Ip.String(), self.Addr.Port)
 
 	buf := make([]byte, 1024)
 waitPeer:
 	for {
-		n, peerAddr, err := conn.ReadFromUDP(buf)
+		n, peerAddr, err := self.Conn.ReadFromUDP(buf)
 		if err != nil {
 			logrus.Error("UDP read error:", err)
 			continue
@@ -160,13 +162,17 @@ waitPeer:
 					Ip:   peerAddr.IP,
 					Port: peerAddr.Port,
 				},
+				SubAddr: &Address{
+					Ip:   peerAddr.IP,
+					Port: authmeta.SubPort,
+				},
 			}
 
 			switch answer {
 			case "y":
 				// 承認レスポンス送信
-				err = Write(conn, fmt.Sprintf("%s:%d", peerAddr.IP.String(), peerAddr.Port),
-					&BaseData{Type: Auth, Data: tray.AuthMeta{Name: self.Name, Flag: tray.Allow}})
+				err = Write(self.Conn, fmt.Sprintf("%s:%d", peerAddr.IP.String(), peerAddr.Port),
+					&BaseData{Type: Auth, Data: tray.AuthMeta{Name: self.Name, SubPort: self.SubAddr.Port, Flag: tray.Allow}})
 				if err != nil {
 					logrus.Error("Failed to send allow response:", err)
 					return nil, err
@@ -177,8 +183,8 @@ waitPeer:
 
 			case "n":
 				// 拒否レスポンス送信
-				err = Write(conn, fmt.Sprintf("%s:%d", peerAddr.IP.String(), peerAddr.Port),
-					&BaseData{Type: Auth, Data: tray.AuthMeta{Name: self.Name, Flag: tray.Deny}})
+				err = Write(self.Conn, fmt.Sprintf("%s:%d", peerAddr.IP.String(), peerAddr.Port),
+					&BaseData{Type: Auth, Data: tray.AuthMeta{Name: self.Name, SubPort: self.SubAddr.Port, Flag: tray.Deny}})
 				if err != nil {
 					logrus.Error("Failed to send deny response:", err)
 				}

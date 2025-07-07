@@ -15,6 +15,7 @@ type FileMeta struct {
 }
 
 type AuthMeta struct {
-	Name string
-	Flag AuthFlag
+	Name    string
+	SubPort int
+	Flag    AuthFlag
 }

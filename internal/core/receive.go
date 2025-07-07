@@ -9,182 +9,39 @@ import (
 	"net"
 	"os"
 	"strconv"
-	"time"
 
 	"github.com/sirupsen/logrus"
 )
 
-//独自パケット、json、shell、コマンドでモード分け
-//一括レシーバーを作り、chanに受信したのを入れ
-//指定した条件に一致の時chanでこっちに値を流す(jsonにできるか、byteのヘッダーが規定通りか、で判断)
-
-func (h *Handle) NewReceiver(buf chan []byte) {
+func (h *Handle) Receiver() {
 	for {
-		basedata, err := receiveFromPeer(h.Self, h.Peer)
+		basedata, err := receiveFromPeer(h.Self, h.Peer, false)
 		if err != nil {
-			logrus.Debugf("Receiver Error: %s", err)
-			continue
-		}
-
-		switch basedata.Type {
-		case FileReqest:
-			filereq, err := ConvertMapToFileReqestMeta(basedata.Data)
-			if err != nil {
-				logrus.Errorf("Decode Error: %s", err)
-				continue
-			}
-
-			err = SendFile(h, filereq.FilePath)
-			if err != nil {
-				logrus.Error(err)
-			}
-		}
-	}
-}
-
-// 非推奨
-func (h *Handle) ReceiverOld() {
-	for {
-		basedata, err := receiveFromPeer(h.Self, h.Peer)
-		if err != nil {
-			// net.Error型の場合のタイムアウトチェックを追加
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				continue // タイムアウトは正常なので continue
+				continue
 			}
 			logrus.Debugf("Receiver Error: %s", err)
 			continue
 		}
 
-		logrus.Info("ぱけっつきた")
-
 		switch basedata.Type {
 		case FileReqest:
+			// FileRequestが来たらpauseを無視してSendFileを実行
 			filereq, err := ConvertMapToFileReqestMeta(basedata.Data)
 			if err != nil {
 				logrus.Errorf("Decode Error: %s", err)
 				continue
 			}
 
-			err = SendFile(h, filereq.FilePath)
+			err = SendFile(h, filereq)
 			if err != nil {
 				logrus.Error(err)
 			}
-			//process
-			//<-send index
-			//->data req
-			//<-file data
-			//->missing packet list
-			//<-send missing packet
-			// ~~~~
-			//->finish packet
+
+			//rewrite Prefix
+			fmt.Printf("> ")
 		case Message:
-
-		}
-	}
-}
-
-func (h *Handle) ClaudeReceiver(pause <-chan bool) {
-	var isPaused bool = false
-	logrus.Info("Receiver started")
-
-	for {
-		select {
-		case p := <-pause:
-			isPaused = p
-			logrus.Infof("Receiver pause state changed: %v", isPaused)
-		default:
-			// より長いタイムアウトを設定（通常の処理用）
-			timeout := time.Second * 5
-			if isPaused {
-				// pause中は短いタイムアウトでFileRequestのみチェック
-				timeout = time.Millisecond * 500
-			}
-
-			h.Self.Conn.SetReadDeadline(time.Now().Add(timeout))
-			basedata, err := receiveFromPeer(h.Self, h.Peer)
-
-			if err != nil {
-				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-					// タイムアウトは正常、continue
-					continue
-				}
-				logrus.Debugf("Receiver Error: %s", err)
-				continue
-			}
-
-			logrus.Debugf("Received packet type: %v", basedata.Type)
-
-			switch basedata.Type {
-			case FileReqest:
-				logrus.Info("Received FileRequest")
-				filereq, err := ConvertMapToFileReqestMeta(basedata.Data)
-				if err != nil {
-					logrus.Errorf("Failed to decode FileRequest: %s", err)
-					continue
-				}
-
-				logrus.Infof("Processing file request for: %s", filereq.FilePath)
-				err = SendFile(h, filereq.FilePath)
-				if err != nil {
-					logrus.Errorf("Failed to send file: %s", err)
-				} else {
-					logrus.Info("File sent successfully")
-				}
-
-			case Message:
-				if !isPaused {
-					logrus.Debug("Received Message packet")
-					// メッセージ処理（pause中でない場合のみ）
-				}
-
-			default:
-				if !isPaused {
-					logrus.Debugf("Received unhandled packet type: %v", basedata.Type)
-				}
-			}
-		}
-	}
-}
-
-func (h *Handle) Receiver(pause <-chan bool) {
-	var pauseflag bool = false
-
-	for {
-		select {
-		case p := <-pause:
-			pauseflag = p
-		default:
-			if pauseflag {
-				time.Sleep(100 * time.Millisecond)
-				continue
-			}
-
-			h.Self.Conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
-			basedata, err := receiveFromPeer(h.Self, h.Peer)
-			if err != nil {
-				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-					continue
-				}
-				logrus.Debugf("Receiver Error: %s", err)
-				continue
-			}
-
-			switch basedata.Type {
-			case FileReqest:
-				// FileRequestが来たらpauseを無視してSendFileを実行
-				filereq, err := ConvertMapToFileReqestMeta(basedata.Data)
-				if err != nil {
-					logrus.Errorf("Decode Error: %s", err)
-					continue
-				}
-
-				err = SendFile(h, filereq.FilePath)
-				if err != nil {
-					logrus.Error(err)
-				}
-			case Message:
-				// 他のメッセージ処理
-			}
+			// 他のメッセージ処理
 		}
 	}
 }
@@ -203,7 +60,7 @@ func calculateFileHash(path string) (string, error) {
 func receiveFileIndex(handle *Handle) (*FileIndexData, error) {
 	//logrus.Debug(receiveFromPeer(handle.Self, handle.Peer))
 	for {
-		meta, err := receiveFromPeer(handle.Self, handle.Peer)
+		meta, err := receiveFromPeer(handle.Self, handle.Peer, true)
 		if err != nil {
 			return nil, err
 		}
@@ -264,7 +121,7 @@ func receiveFileChunk(conn *net.UDPConn) (*FileChunk, error) {
 func ReceiveTray(self *SelfConfig, peer *PeerConfig) (*[]tray.FileMeta, error) {
 	logrus.Debug("Waiting for tray data from peer...")
 
-	meta, err := receiveFromPeer(self, peer)
+	meta, err := receiveFromPeer(self, peer, false)
 	if err != nil {
 		logrus.Error("Failed to receive from peer:", err)
 		return nil, err

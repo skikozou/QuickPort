@@ -86,7 +86,7 @@ func main() {
 		logrus.Info("Debug mode selected")
 	}
 
-	fmt.Printf("%s:%d <==> %s:%d\n", handle.Self.LocalAddr.Ip.String(), handle.Self.LocalAddr.Port, handle.Peer.Addr.Ip.String(), handle.Peer.Addr.Port)
+	fmt.Printf("%s:%d <==> %s:%d\n", handle.Self.Addr.Ip.String(), handle.Self.Addr.Port, handle.Peer.Addr.Ip.String(), handle.Peer.Addr.Port)
 
 	//main Receiver
 	/*/
@@ -109,11 +109,10 @@ func main() {
 	handle.NewReceiver(buf)
 	/*/
 
-	pause := make(chan bool, 1)
-	go handle.Receiver(pause)
+	go handle.Receiver()
 
 	//shell
-	handle, err = shell.Run(handle, pause)
+	handle, err = shell.Run(handle)
 	if err != nil {
 		logrus.Error(err)
 		return

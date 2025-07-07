@@ -9,11 +9,15 @@ import (
 	"github.com/pion/stun"
 )
 
-func receiveFromPeer(self *SelfConfig, peer *PeerConfig) (*BaseData, error) {
+func receiveFromPeer(self *SelfConfig, peer *PeerConfig, useSub bool) (*BaseData, error) {
 	buf := make([]byte, 1024)
+	conn := self.Conn
+	if useSub {
+		conn = self.SubConn
+	}
 
 	for {
-		n, peerAddr, err := self.Conn.ReadFromUDP(buf)
+		n, peerAddr, err := conn.ReadFromUDP(buf)
 		if err != nil {
 			if n == 0 && peerAddr == nil {
 				continue
@@ -22,8 +26,14 @@ func receiveFromPeer(self *SelfConfig, peer *PeerConfig) (*BaseData, error) {
 			return nil, fmt.Errorf("receiver error")
 		}
 
-		if peerAddr.IP.String() != peer.Addr.Ip.String() || peerAddr.Port != peer.Addr.Port {
-			continue
+		if useSub {
+			if peerAddr.IP.String() != peer.SubAddr.Ip.String() || peerAddr.Port != peer.SubAddr.Port {
+				continue
+			}
+		} else {
+			if peerAddr.IP.String() != peer.Addr.Ip.String() || peerAddr.Port != peer.Addr.Port {
+				continue
+			}
 		}
 
 		var meta BaseData

@@ -18,7 +18,6 @@ func Host() (*Handle, error) {
 
 	token := GenToken(self)
 	logrus.Info(fmt.Sprintf("Your token: %s", token))
-
 	// 接続待ち
 	peer, err := SyncListener(self)
 	if err != nil {
