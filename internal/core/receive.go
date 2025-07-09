@@ -58,7 +58,6 @@ func calculateFileHash(path string) (string, error) {
 }
 
 func receiveFileIndex(handle *Handle) (*FileIndexData, error) {
-	//logrus.Debug(receiveFromPeer(handle.Self, handle.Peer))
 	for {
 		meta, err := receiveFromPeer(handle.Self, handle.Peer, true)
 		if err != nil {
@@ -66,7 +65,7 @@ func receiveFileIndex(handle *Handle) (*FileIndexData, error) {
 		}
 
 		if meta.Type != FileIndex {
-			logrus.Debugf("Ignoring packet type: %d, waiting for FileIndex", meta.Type) // ←ログレベルを修正
+			logrus.Debugf("Ignoring packet type: %d, waiting for FileIndex", meta.Type)
 			continue
 		}
 

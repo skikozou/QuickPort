@@ -26,9 +26,10 @@ const (
 )
 
 const (
-	ChunkSize      = 1400
-	MaxRetries     = 5
-	TimeoutSeconds = 1
+	ChunkSize                  = 1400
+	MaxRetries                 = 10
+	ChunkTimeoutSeconds        = 1
+	MissingChunkTimeoutSeconds = 3
 )
 
 type ReceiverController struct {

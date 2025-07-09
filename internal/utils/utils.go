@@ -36,7 +36,7 @@ func SetUpLogrus() {
 		DisableLevelTruncation: true,
 		PadLevelText:           true,
 	})
-	logrus.SetLevel(logrus.InfoLevel)
+	logrus.SetLevel(logrus.DebugLevel)
 }
 
 func OpenTty() (*tty.TTY, error) {

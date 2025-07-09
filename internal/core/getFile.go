@@ -80,7 +80,7 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 
 	for len(receivedChunks) < int(indexData.ChunkCount) {
 		// タイムアウト設定
-		handle.Self.SubConn.SetReadDeadline(time.Now().Add(time.Second * TimeoutSeconds))
+		handle.Self.SubConn.SetReadDeadline(time.Now().Add(time.Second * ChunkTimeoutSeconds))
 
 		chunk, err := receiveFileChunk(handle.Self.SubConn)
 		if err != nil {
@@ -133,7 +133,7 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 
 		for len(missingChunks) > 0 {
 			// 欠落チャンクの受信
-			handle.Self.SubConn.SetReadDeadline(time.Now().Add(time.Second * TimeoutSeconds))
+			handle.Self.SubConn.SetReadDeadline(time.Now().Add(time.Second * MissingChunkTimeoutSeconds))
 
 			chunk, err := receiveFileChunk(handle.Self.SubConn)
 			if err != nil {
@@ -190,6 +190,9 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 				Message: "File hash mismatch",
 			},
 		}
+
+		file.Close()
+		os.Remove(outputPath)
 
 		err = Write(handle.Self.SubConn, handle.Peer.SubAddr.StrAddr(), &finishData)
 		if err != nil {

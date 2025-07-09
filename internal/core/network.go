@@ -29,6 +29,8 @@ func receiveFromPeer(self *SelfConfig, peer *PeerConfig, useSub bool) (*BaseData
 			return nil, fmt.Errorf("receiver error")
 		}
 
+		logrus.Debugf("sig: %s:%d", peerAddr.IP.String(), peerAddr.Port)
+
 		if useSub {
 			if peerAddr.IP.String() != peer.SubAddr.Ip.String() || peerAddr.Port != peer.SubAddr.Port {
 				continue
