@@ -65,6 +65,8 @@ func receiveFileIndex(handle *Handle) (*FileIndexData, error) {
 			return nil, err
 		}
 
+		logrus.Debug("received")
+
 		if meta.Type != FileIndex {
 			logrus.Debugf("Ignoring packet type: %d, waiting for FileIndex", meta.Type)
 			continue

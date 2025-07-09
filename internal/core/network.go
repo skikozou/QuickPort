@@ -29,6 +29,10 @@ func receiveFromPeer(self *SelfConfig, peer *PeerConfig, useSub bool) (*BaseData
 			return nil, fmt.Errorf("receiver error")
 		}
 
+		if utils.DebugVal["secondShare"] == "1" {
+			logrus.Debug(peerAddr.IP, peerAddr.Port, n)
+		}
+
 		if useSub {
 			if peerAddr.IP.String() != peer.SubAddr.Ip.String() || peerAddr.Port != peer.SubAddr.Port {
 				continue
