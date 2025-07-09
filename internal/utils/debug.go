@@ -1,3 +1,3 @@
 package utils
 
-var DebugVal map[string]string
+var DebugVal map[string]string = map[string]string{}

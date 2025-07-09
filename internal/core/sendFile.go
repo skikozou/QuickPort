@@ -72,8 +72,9 @@ func SendFile(handle *Handle, filereq *fileRequestData) error {
 		},
 	}
 
-	err = Write(handle.Self.SubConn, handle.Peer.SubAddr.StrAddr(), &indexData)
+	logrus.Debug(handle.Self.SubConn, handle.Peer.SubAddr.StrAddr(), indexData)
 
+	err = Write(handle.Self.SubConn, handle.Peer.SubAddr.StrAddr(), &indexData)
 	if err != nil {
 		return fmt.Errorf("failed to send file index: %v", err)
 	}
