@@ -19,6 +19,11 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 	}
 
 	filePath := args.Head()
+	var compMode string
+
+	if len(args.Arg) >= 2 {
+		compMode = args.Next().Head()
+	}
 
 	// Step 1: ファイルリクエスト送信
 	logrus.Infof("Requesting file: %s", filePath)
@@ -26,6 +31,7 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 		Type: FileReqest,
 		Data: fileRequestData{
 			FilePath: filePath,
+			CompMode: compMode,
 		},
 	}
 
@@ -72,10 +78,10 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 	receivedChunks := make(map[uint32]bool)
 	missingChunks := make([]uint32, 0)
 
-	// タイムアウト設定
-	handle.Self.SubConn.SetReadDeadline(time.Now().Add(time.Second * TimeoutSeconds))
-
 	for len(receivedChunks) < int(indexData.ChunkCount) {
+		// タイムアウト設定
+		handle.Self.SubConn.SetReadDeadline(time.Now().Add(time.Second * TimeoutSeconds))
+
 		chunk, err := receiveFileChunk(handle.Self.SubConn)
 		if err != nil {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
@@ -94,7 +100,12 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 
 		// チャンクをファイルに書き込み
 		offset := int64(chunk.Index) * int64(ChunkSize)
-		_, err = file.WriteAt(chunk.Data, offset)
+		decompressed, err := Decompress(chunk.Data, compMode)
+		if err != nil {
+			return err
+		}
+
+		_, err = file.WriteAt(decompressed, offset)
 		if err != nil {
 			return fmt.Errorf("failed to write chunk %d: %v", chunk.Index, err)
 		}
@@ -115,22 +126,15 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 		logrus.Infof("Requesting %d missing chunks (retry %d/%d)", len(missingChunks), retryCount+1, MaxRetries)
 
 		// 欠落チャンクリスト送信
-		missingData := BaseData{
-			Type: Message,
-			Data: MissingPacketData{
-				MissingChunks: missingChunks,
-			},
-		}
-
-		err = Write(handle.Self.SubConn, handle.Peer.SubAddr.StrAddr(), &missingData)
+		err = sendMissingChunksList(handle, missingChunks)
 		if err != nil {
-			return fmt.Errorf("failed to send request: %v", err)
+			return fmt.Errorf("failed to send missing chunks list: %v", err)
 		}
-
-		// 欠落チャンクの受信
-		handle.Self.SubConn.SetReadDeadline(time.Now().Add(time.Second * TimeoutSeconds))
 
 		for len(missingChunks) > 0 {
+			// 欠落チャンクの受信
+			handle.Self.SubConn.SetReadDeadline(time.Now().Add(time.Second * TimeoutSeconds))
+
 			chunk, err := receiveFileChunk(handle.Self.SubConn)
 			if err != nil {
 				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
@@ -148,7 +152,12 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 
 			// チャンクをファイルに書き込み
 			offset := int64(chunk.Index) * int64(ChunkSize)
-			_, err = file.WriteAt(chunk.Data, offset)
+			decompressed, err := Decompress(chunk.Data, compMode)
+			if err != nil {
+				return err
+			}
+
+			_, err = file.WriteAt(decompressed, offset)
 			if err != nil {
 				return fmt.Errorf("failed to write missing chunk %d: %v", chunk.Index, err)
 			}
@@ -205,5 +214,43 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 	}
 
 	logrus.Infof("File downloaded successfully: %s", outputPath)
+	return nil
+}
+func sendMissingChunksList(handle *Handle, missingChunks []uint32) error {
+	const maxChunksPerPacket = 135 // 1つのパケットで送信可能な最大チャンク数
+
+	// 分割パケット数を計算
+	totalPackets := (len(missingChunks) + maxChunksPerPacket - 1) / maxChunksPerPacket
+
+	for i := 0; i < totalPackets; i++ {
+		start := i * maxChunksPerPacket
+		end := start + maxChunksPerPacket
+		if end > len(missingChunks) {
+			end = len(missingChunks)
+		}
+
+		// 分割されたチャンクリスト
+		chunkSlice := missingChunks[start:end]
+
+		// 分割パケットデータ
+		packetData := MissingPacketData{
+			MissingChunks: chunkSlice,
+			PacketIndex:   uint32(i),
+			TotalPackets:  uint32(totalPackets),
+		}
+
+		missingData := BaseData{
+			Type: PacketInfo,
+			Data: packetData,
+		}
+
+		err := Write(handle.Self.SubConn, handle.Peer.SubAddr.StrAddr(), &missingData)
+		if err != nil {
+			return fmt.Errorf("failed to send missing chunk packet %d/%d: %v", i+1, totalPackets, err)
+		}
+
+		logrus.Debugf("Sent missing chunk packet %d/%d with %d chunks", i+1, totalPackets, len(chunkSlice))
+	}
+
 	return nil
 }

@@ -16,6 +16,7 @@ const (
 	FileReqest
 	FileIndex
 	File
+	PacketInfo
 )
 
 const (
@@ -26,8 +27,8 @@ const (
 
 const (
 	ChunkSize      = 1400
-	MaxRetries     = 3
-	TimeoutSeconds = 30
+	MaxRetries     = 5
+	TimeoutSeconds = 1
 )
 
 type ReceiverController struct {
@@ -54,6 +55,8 @@ type FileIndexData struct {
 
 type MissingPacketData struct {
 	MissingChunks []uint32 `json:"missing_chunks"`
+	PacketIndex   uint32   `json:"packet_index"`  // 現在のパケットインデックス
+	TotalPackets  uint32   `json:"total_packets"` // 総パケット数
 }
 
 // Finish packet
@@ -74,6 +77,7 @@ type BaseData struct {
 
 type fileRequestData struct {
 	FilePath string
+	CompMode string
 }
 
 type Address struct {

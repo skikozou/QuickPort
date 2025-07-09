@@ -7,6 +7,7 @@ import (
 	"net"
 
 	"github.com/pion/stun"
+	"github.com/sirupsen/logrus"
 )
 
 func receiveFromPeer(self *SelfConfig, peer *PeerConfig, useSub bool) (*BaseData, error) {
@@ -22,6 +23,8 @@ func receiveFromPeer(self *SelfConfig, peer *PeerConfig, useSub bool) (*BaseData
 			if n == 0 && peerAddr == nil {
 				continue
 			}
+
+			logrus.Debugf("fuckin packet: %d %s", n, err.Error())
 
 			return nil, fmt.Errorf("receiver error")
 		}
@@ -187,6 +190,10 @@ func Write(conn *net.UDPConn, targetAddr string, data *BaseData) error {
 	raw, err := json.Marshal(data)
 	if err != nil {
 		return err
+	}
+
+	if data.Type == Message {
+		logrus.Debug(len(raw))
 	}
 
 	_, err = conn.WriteToUDP(raw, raddr)
