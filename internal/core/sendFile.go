@@ -117,6 +117,8 @@ func SendFile(handle *Handle, filereq *fileRequestData) error {
 			return fmt.Errorf("failed to receive missing chunks list: %v", err)
 		}
 
+		logrus.Debug(len(missingChunks))
+
 		if finished {
 			logrus.Info("File transfer completed successfully")
 			return nil

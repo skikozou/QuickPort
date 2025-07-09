@@ -29,8 +29,6 @@ func receiveFromPeer(self *SelfConfig, peer *PeerConfig, useSub bool) (*BaseData
 			return nil, fmt.Errorf("receiver error")
 		}
 
-		logrus.Debugf("sig: %s:%d", peerAddr.IP.String(), peerAddr.Port)
-
 		if useSub {
 			if peerAddr.IP.String() != peer.SubAddr.Ip.String() || peerAddr.Port != peer.SubAddr.Port {
 				continue
@@ -192,10 +190,6 @@ func Write(conn *net.UDPConn, targetAddr string, data *BaseData) error {
 	raw, err := json.Marshal(data)
 	if err != nil {
 		return err
-	}
-
-	if data.Type == Message {
-		logrus.Debug(len(raw))
 	}
 
 	_, err = conn.WriteToUDP(raw, raddr)

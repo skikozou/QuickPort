@@ -59,6 +59,7 @@ func calculateFileHash(path string) (string, error) {
 
 func receiveFileIndex(handle *Handle) (*FileIndexData, error) {
 	for {
+		logrus.Debug("loop")
 		meta, err := receiveFromPeer(handle.Self, handle.Peer, true)
 		if err != nil {
 			return nil, err
