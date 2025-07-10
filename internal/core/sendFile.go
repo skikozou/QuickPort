@@ -10,11 +10,19 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/sirupsen/logrus"
 )
 
 func SendFile(handle *Handle, filereq *fileRequestData) error {
+	if handle.Self.Conn != nil {
+		handle.Self.Conn.SetReadDeadline(time.Time{})
+	}
+	if handle.Self.SubConn != nil {
+		handle.Self.SubConn.SetReadDeadline(time.Time{})
+	}
+
 	// Step 1: ファイルの存在確認とメタデータ取得
 	fullpath := tray.UseTray() + filepath.Clean(filereq.FilePath)
 	fileInfo, err := os.Stat(fullpath)

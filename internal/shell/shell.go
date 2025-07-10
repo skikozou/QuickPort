@@ -36,6 +36,7 @@ func Run(handle *core.Handle) (*core.Handle, error) {
 			if err != nil {
 				return handle, err
 			}
+			handle.ResetConn()
 		case "exit":
 			return handle, nil
 			//exit process

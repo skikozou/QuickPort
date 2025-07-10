@@ -26,6 +26,13 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 		compMode = args.Next().Head()
 	}
 
+	if handle.Self.Conn != nil {
+		handle.Self.Conn.SetReadDeadline(time.Time{})
+	}
+	if handle.Self.SubConn != nil {
+		handle.Self.SubConn.SetReadDeadline(time.Time{})
+	}
+
 	// Step 1: ファイルリクエスト送信
 	logrus.Infof("Requesting file: %s", filePath)
 	reqData := BaseData{
@@ -194,6 +201,7 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 		}
 
 		file.Close()
+		file = nil
 		os.Remove(outputPath)
 
 		err = Write(handle.Self.SubConn, handle.Peer.SubAddr.StrAddr(), &finishData)

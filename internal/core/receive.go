@@ -37,6 +37,7 @@ func (h *Handle) Receiver() {
 			if err != nil {
 				logrus.Error(err)
 			}
+			h.ResetConn()
 
 			//rewrite Prefix
 			fmt.Printf("> ")

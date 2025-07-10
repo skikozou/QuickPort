@@ -5,10 +5,35 @@ import (
 	"QuickPort/utils"
 	"encoding/json"
 	"fmt"
+	"net"
 	"strconv"
 
 	"github.com/sirupsen/logrus"
 )
+
+func (h *Handle) ResetConn() error {
+	h.Self.Conn.Close()
+	addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf(":%s", strconv.Itoa(h.Self.Addr.Port)))
+	if err != nil {
+		return err
+	}
+	h.Self.Conn, err = net.ListenUDP("udp", addr)
+	if err != nil {
+		return err
+	}
+
+	h.Self.SubConn.Close()
+	addr, err = net.ResolveUDPAddr("udp", fmt.Sprintf(":%s", strconv.Itoa(h.Self.SubAddr.Port)))
+	if err != nil {
+		return err
+	}
+	h.Self.SubConn, err = net.ListenUDP("udp", addr)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
 
 func SetupPort() (*SelfConfig, error) {
 	self := SelfConfig{}
