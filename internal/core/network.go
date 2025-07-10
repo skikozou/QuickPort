@@ -29,12 +29,6 @@ func receiveFromPeer(self *SelfConfig, peer *PeerConfig, useSub bool) (*BaseData
 			return nil, fmt.Errorf("receiver error")
 		}
 
-		if utils.DebugVal["secondShare"] == "1" {
-			fmt.Println("====================================================")
-			fmt.Println(string(buf[:n]))
-			fmt.Println("====================================================")
-		}
-
 		if useSub {
 			if peerAddr.IP.String() != peer.SubAddr.Ip.String() || peerAddr.Port != peer.SubAddr.Port {
 				continue

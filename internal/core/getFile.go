@@ -2,7 +2,6 @@ package core
 
 import (
 	"QuickPort/tray"
-	"QuickPort/utils"
 	"fmt"
 	"hash/crc32"
 	"net"
@@ -51,7 +50,6 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 	}
 
 	// Step 2: インデックス情報受信
-	utils.DebugVal["secondShare"] = "1"
 	logrus.Info("Waiting for file index...")
 	indexData, err := receiveFileIndex(handle)
 	if err != nil {

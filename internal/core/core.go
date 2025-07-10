@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"time"
 
 	"github.com/sirupsen/logrus"
 )
@@ -30,6 +31,13 @@ func (h *Handle) ResetConn() error {
 	h.Self.SubConn, err = net.ListenUDP("udp", addr)
 	if err != nil {
 		return err
+	}
+
+	if h.Self.Conn != nil {
+		h.Self.Conn.SetReadDeadline(time.Time{})
+	}
+	if h.Self.SubConn != nil {
+		h.Self.SubConn.SetReadDeadline(time.Time{})
 	}
 
 	return nil

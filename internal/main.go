@@ -88,28 +88,11 @@ func main() {
 
 	fmt.Printf("%s:%d <==> %s:%d\n", handle.Self.Addr.Ip.String(), handle.Self.Addr.Port, handle.Peer.Addr.Ip.String(), handle.Peer.Addr.Port)
 
-	//main Receiver
-	/*/
-	exit := make(chan bool, 1)
-	recovery := make(chan bool, 1)
-	go handle.Receiver(exit)
-
-	go func() {
-		for r := range recovery {
-			if r {
-				go handle.Receiver(exit)
-			}
-		}
-	}()
-	/*/
-
-	//debug
-	/*/
-	buf := make(chan []byte, 1000)
-	handle.NewReceiver(buf)
-	/*/
-
 	go handle.Receiver()
+
+	//ping
+	core.RecordPingTime()
+	go handle.Ping()
 
 	//shell
 	handle, err = shell.Run(handle)

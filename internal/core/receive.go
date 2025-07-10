@@ -43,6 +43,8 @@ func (h *Handle) Receiver() {
 			fmt.Printf("> ")
 		case Message:
 			// 他のメッセージ処理
+		case Ping:
+			RecordPingTime()
 		}
 	}
 }

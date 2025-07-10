@@ -7,7 +7,6 @@ import (
 )
 
 type dataType int
-type ReceiverMode int
 
 const (
 	SyncTray dataType = iota
@@ -17,12 +16,7 @@ const (
 	FileIndex
 	File
 	PacketInfo
-)
-
-const (
-	FileJSON ReceiverMode = iota
-	FileTransfer
-	Receiver
+	Ping
 )
 
 const (
