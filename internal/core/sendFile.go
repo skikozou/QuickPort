@@ -38,46 +38,47 @@ func SendFile(handle *Handle, filereq *fileRequestData) error {
 		return fmt.Errorf("path is a directory, not a file: %s", filereq.FilePath)
 	}
 
-	// Step 2: ファイルハッシュ計算
-	fileHash, err := calculateFileHash(fullpath)
-	logrus.Debugf("filehash: %s", fileHash)
+	// Step 2: 元のファイルハッシュを計算（圧縮前）
+	originalFileHash, err := calculateFileHash(fullpath)
+	logrus.Debugf("original file hash: %s", originalFileHash)
 	if err != nil {
 		return fmt.Errorf("failed to calculate file hash: %v", err)
 	}
 
-	// Step 6: ファイルを開く（修正：フルパスを使用）
-	file, err := os.Open(fullpath) // ←ここを修正
+	// Step 3: ファイルを読み込んで圧縮
+	file, err := os.Open(fullpath)
 	if err != nil {
 		return fmt.Errorf("failed to open file: %v", err)
 	}
 	defer file.Close()
 
-	//圧縮処理
+	// ファイル全体を読み込み
 	raw, err := io.ReadAll(file)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to read file: %v", err)
 	}
 
+	// 圧縮処理
 	compressed, err := Compress(raw, filereq.CompMode)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to compress file: %v", err)
 	}
 
 	compressedSize := int64(len(compressed))
-	fileReader := bytes.NewReader(compressed)
+	logrus.Debugf("Original size: %d, Compressed size: %d", len(raw), compressedSize)
 
-	// Step 3: チャンク数計算
+	// Step 4: チャンク数計算（圧縮されたデータのサイズに基づく）
 	chunkCount := uint32((compressedSize + int64(ChunkSize) - 1) / int64(ChunkSize))
 	logrus.Debugf("chunk count: %d", chunkCount)
 
-	// Step 4: ファイルインデックス情報送信
+	// Step 5: ファイルインデックス情報送信
 	indexData := BaseData{
 		Type: FileIndex,
 		Data: FileIndexData{
 			FilePath:   filereq.FilePath,
-			TotalSize:  compressedSize,
+			TotalSize:  compressedSize, // 圧縮されたサイズ
 			ChunkCount: chunkCount,
-			FileHash:   fileHash,
+			FileHash:   originalFileHash, // 元のファイルハッシュ
 			ChunkSize:  ChunkSize,
 		},
 	}
@@ -87,9 +88,10 @@ func SendFile(handle *Handle, filereq *fileRequestData) error {
 		return fmt.Errorf("failed to send file index: %v", err)
 	}
 
-	logrus.Infof("Sent file index - Size: %d bytes, Chunks: %d", fileInfo.Size(), chunkCount)
+	logrus.Infof("Sent file index - Original size: %d bytes, Compressed size: %d bytes, Chunks: %d",
+		len(raw), compressedSize, chunkCount)
 
-	// Step 5: 転送開始信号を待機
+	// Step 6: 転送開始信号を待機
 	logrus.Info("Waiting for transfer start signal...")
 	for {
 		meta, err := receiveFromPeer(handle.Self, handle.Peer, true)
@@ -108,7 +110,8 @@ func SendFile(handle *Handle, filereq *fileRequestData) error {
 
 	// Step 7: 初回ファイル送信
 	logrus.Info("Starting file transmission...")
-	err = sendFileChunks(handle, fileReader, chunkCount)
+	compressedReader := bytes.NewReader(compressed)
+	err = sendFileChunks(handle, compressedReader, chunkCount)
 	if err != nil {
 		return fmt.Errorf("failed to send file chunks: %v", err)
 	}
@@ -141,7 +144,8 @@ func SendFile(handle *Handle, filereq *fileRequestData) error {
 		logrus.Infof("Resending %d missing chunks (retry %d/%d)",
 			len(missingChunks), retryCount+1, MaxRetries)
 
-		err = sendMissingChunks(handle, file, missingChunks)
+		// 圧縮されたデータから欠落チャンクを再送
+		err = sendMissingChunks(handle, compressed, missingChunks)
 		if err != nil {
 			return fmt.Errorf("failed to resend missing chunks: %v", err)
 		}
@@ -234,21 +238,22 @@ func sendFileChunks(handle *Handle, reader io.Reader, chunkCount uint32) error {
 	return nil
 }
 
-// sendMissingChunks resends specific missing chunks
-func sendMissingChunks(handle *Handle, file *os.File, missingChunks []uint32) error {
+// sendMissingChunks resends specific missing chunks from compressed data
+func sendMissingChunks(handle *Handle, compressedData []byte, missingChunks []uint32) error {
+	reader := bytes.NewReader(compressedData)
 	buffer := make([]byte, ChunkSize)
 
 	for _, chunkIndex := range missingChunks {
-		// ファイルの該当位置にシーク
+		// 圧縮されたデータの該当位置にシーク
 		offset := int64(chunkIndex) * int64(ChunkSize)
-		_, err := file.Seek(offset, 0)
+		_, err := reader.Seek(offset, 0)
 		if err != nil {
-			return fmt.Errorf("failed to seek file for missing chunk %d: %v", chunkIndex, err)
+			return fmt.Errorf("failed to seek compressed data for missing chunk %d: %v", chunkIndex, err)
 		}
 
 		// チャンクデータ読み込み
-		n, err := file.Read(buffer)
-		if err != nil && err.Error() != "EOF" {
+		n, err := reader.Read(buffer)
+		if err != nil && err != io.EOF {
 			return fmt.Errorf("failed to read missing chunk %d: %v", chunkIndex, err)
 		}
 

@@ -86,7 +86,7 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 	logrus.Info("Sent start transfer signal, receiving file chunks...")
 
 	// Step 5: チャンク受信ループ
-	receivedChunks := make(map[uint32]bool)
+	receivedChunks := make(map[uint32][]byte) // チャンクデータも保存
 	missingChunks := make([]uint32, 0)
 
 	for len(receivedChunks) < int(indexData.ChunkCount) {
@@ -109,26 +109,14 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 			continue
 		}
 
-		// チャンクをファイルに書き込み
-		decompressed, err := Decompress(chunk.Data, compMode)
-		if err != nil {
-			logrus.Errorf("展開エラー: %d", len(chunk.Data))
-			return err
-		}
-
-		offset := int64(chunk.Index) * int64(len(decompressed))
-		_, err = file.WriteAt(decompressed, offset)
-		if err != nil {
-			return fmt.Errorf("failed to write chunk %d: %v", chunk.Index, err)
-		}
-
-		receivedChunks[chunk.Index] = true
+		// チャンクデータを保存（圧縮されたまま）
+		receivedChunks[chunk.Index] = chunk.Data
 		logrus.Debugf("Received chunk %d/%d", len(receivedChunks), indexData.ChunkCount)
 	}
 
 	// Step 6: 欠落チャンクの確認と再送要求
 	for i := uint32(0); i < indexData.ChunkCount; i++ {
-		if !receivedChunks[i] {
+		if _, exists := receivedChunks[i]; !exists {
 			missingChunks = append(missingChunks, i)
 		}
 	}
@@ -162,17 +150,8 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 				continue
 			}
 
-			// チャンクをファイルに書き込み
-			offset := int64(chunk.Index) * int64(ChunkSize)
-			decompressed, err := Decompress(chunk.Data, compMode)
-			if err != nil {
-				return err
-			}
-
-			_, err = file.WriteAt(decompressed, offset)
-			if err != nil {
-				return fmt.Errorf("failed to write missing chunk %d: %v", chunk.Index, err)
-			}
+			// チャンクデータを保存
+			receivedChunks[chunk.Index] = chunk.Data
 
 			// 欠落リストから削除
 			for i, missing := range missingChunks {
@@ -186,7 +165,32 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 		retryCount++
 	}
 
-	// Step 7: ファイル整合性チェック
+	// Step 7: 全チャンクを結合して展開
+	logrus.Info("Reconstructing file from chunks...")
+
+	// 圧縮されたデータを結合
+	compressedData := make([]byte, 0, indexData.TotalSize)
+	for i := uint32(0); i < indexData.ChunkCount; i++ {
+		if chunkData, exists := receivedChunks[i]; exists {
+			compressedData = append(compressedData, chunkData...)
+		} else {
+			return fmt.Errorf("missing chunk %d after retry", i)
+		}
+	}
+
+	// 圧縮されたデータを展開
+	decompressedData, err := Decompress(compressedData, compMode)
+	if err != nil {
+		return fmt.Errorf("failed to decompress data: %v", err)
+	}
+
+	// 展開されたデータをファイルに書き込み
+	_, err = file.Write(decompressedData)
+	if err != nil {
+		return fmt.Errorf("failed to write decompressed data: %v", err)
+	}
+
+	// Step 8: ファイル整合性チェック
 	file.Close()
 	receivedHash, err := calculateFileHash(outputPath)
 	if err != nil {
@@ -203,8 +207,6 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 			},
 		}
 
-		file.Close()
-		file = nil
 		os.Remove(outputPath)
 
 		err = Write(handle.Self.SubConn, handle.Peer.SubAddr.StrAddr(), &finishData)
@@ -215,7 +217,7 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 		return fmt.Errorf("file hash mismatch - expected: %s, got: %s", indexData.FileHash, receivedHash)
 	}
 
-	// Step 8: 終了パケット送信（成功）
+	// Step 9: 終了パケット送信（成功）
 	finishData := BaseData{
 		Type: Message,
 		Data: FinishPacketData{
@@ -232,6 +234,7 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 	logrus.Infof("File downloaded successfully: %s", outputPath)
 	return nil
 }
+
 func sendMissingChunksList(handle *Handle, missingChunks []uint32) error {
 	const maxChunksPerPacket = 135 // 1つのパケットで送信可能な最大チャンク数
 

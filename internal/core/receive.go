@@ -58,6 +58,12 @@ func calculateFileHash(path string) (string, error) {
 	return strconv.FormatUint(uint64(h.Sum32()), 10), nil
 }
 
+func calculateBinaryHash(raw []byte) (string, error) {
+	h := fnv.New32a()
+	h.Write([]byte(raw))
+	return strconv.FormatUint(uint64(h.Sum32()), 10), nil
+}
+
 func receiveFileIndex(handle *Handle) (*FileIndexData, error) {
 	for {
 		logrus.Debug("loop")

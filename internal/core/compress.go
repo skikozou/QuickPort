@@ -58,7 +58,7 @@ func Decompress(data []byte, mode string) ([]byte, error) {
 	switch mode {
 	case "high":
 		// zstd
-		decoder, err := zstd.NewReader(nil)
+		decoder, err := zstd.NewReader(nil, zstd.WithDecoderMaxWindow(512<<20)) // 最大512MiBまで許容
 		if err != nil {
 			return nil, err
 		}
