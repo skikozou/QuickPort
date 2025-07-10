@@ -23,6 +23,8 @@ func SendFile(handle *Handle, filereq *fileRequestData) error {
 		handle.Self.SubConn.SetReadDeadline(time.Time{})
 	}
 
+	logrus.Debug(filereq.CompMode)
+
 	// Step 1: ファイルの存在確認とメタデータ取得
 	fullpath := tray.UseTray() + filepath.Clean(filereq.FilePath)
 	fileInfo, err := os.Stat(fullpath)

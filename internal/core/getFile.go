@@ -112,7 +112,7 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 		// チャンクをファイルに書き込み
 		decompressed, err := Decompress(chunk.Data, compMode)
 		if err != nil {
-			logrus.Errorf("展開エラー: %d\n%s", len(decompressed), string(decompressed))
+			logrus.Errorf("展開エラー: %d", len(chunk.Data))
 			return err
 		}
 
