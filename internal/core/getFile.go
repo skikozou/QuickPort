@@ -26,6 +26,8 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 		compMode = args.Next().Head()
 	}
 
+	logrus.Debug(compMode)
+
 	if handle.Self.Conn != nil {
 		handle.Self.Conn.SetReadDeadline(time.Time{})
 	}
@@ -108,12 +110,13 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 		}
 
 		// チャンクをファイルに書き込み
-		offset := int64(chunk.Index) * int64(ChunkSize)
 		decompressed, err := Decompress(chunk.Data, compMode)
 		if err != nil {
+			logrus.Errorf("展開エラー: %d\n%s", len(decompressed), string(decompressed))
 			return err
 		}
 
+		offset := int64(chunk.Index) * int64(len(decompressed))
 		_, err = file.WriteAt(decompressed, offset)
 		if err != nil {
 			return fmt.Errorf("failed to write chunk %d: %v", chunk.Index, err)
