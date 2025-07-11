@@ -9,7 +9,7 @@ import (
 
 var (
 	timer      *time.Timer
-	timeoutDur = 15 * time.Second
+	timeoutDur = 30 * time.Second
 	mu         sync.Mutex
 )
 

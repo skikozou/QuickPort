@@ -40,6 +40,8 @@ func (h *Handle) ResetConn() error {
 		h.Self.SubConn.SetReadDeadline(time.Time{})
 	}
 
+	RecordPingTime()
+
 	return nil
 }
 

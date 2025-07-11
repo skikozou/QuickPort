@@ -27,13 +27,6 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 
 	logrus.Debug(compMode)
 
-	if handle.Self.Conn != nil {
-		handle.Self.Conn.SetReadDeadline(time.Time{})
-	}
-	if handle.Self.SubConn != nil {
-		handle.Self.SubConn.SetReadDeadline(time.Time{})
-	}
-
 	// Step 1: ファイルリクエスト送信
 	logrus.Infof("Requesting file: %s", filePath)
 	reqData := BaseData{
