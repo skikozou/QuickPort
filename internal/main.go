@@ -88,6 +88,7 @@ func main() {
 
 	fmt.Printf("%s:%d <==> %s:%d\n", handle.Self.Addr.Ip.String(), handle.Self.Addr.Port, handle.Peer.Addr.Ip.String(), handle.Peer.Addr.Port)
 
+	handle.Pause = make(chan bool)
 	go handle.Receiver()
 
 	//ping

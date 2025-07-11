@@ -9,45 +9,76 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/sirupsen/logrus"
 )
 
 func (h *Handle) Receiver() {
+	isPause := false
 	for {
-		basedata, err := receiveFromPeer(h.Self, h.Peer, false)
-		if err != nil {
-			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+		select {
+		case p, ok := <-h.Pause:
+			if ok {
+				isPause = p
 				continue
 			}
-			logrus.Debugf("Receiver Error: %s", err)
-			continue
-		}
-
-		switch basedata.Type {
-		case FileReqest:
-			// FileRequestが来たらpauseを無視してSendFileを実行
-			filereq, err := ConvertMapToFileReqestMeta(basedata.Data)
-			if err != nil {
-				logrus.Errorf("Decode Error: %s", err)
+		default:
+			if isPause {
 				continue
 			}
 
-			err = SendFile(h, filereq)
-			if err != nil {
-				logrus.Error(err)
-			}
-			h.ResetConn()
+			buf := make([]byte, 1024)
 
-			//rewrite Prefix
-			fmt.Printf("> ")
-		case Message:
-			// 他のメッセージ処理
-		case Ping:
-			RecordPingTime()
-		case FileIndex:
-			// FileIndexはgetFileが直接受信するため、ここでは無視
-			logrus.Debug("Ignoring FileIndex packet in Receiver")
+			h.Self.Conn.SetReadDeadline(time.Now().Add(time.Microsecond * 100))
+			n, peerAddr, err := h.Self.Conn.ReadFromUDP(buf)
+			if err != nil {
+				if n == 0 && peerAddr == nil {
+					continue
+				}
+
+				logrus.Debugf("fuckin packet: %d %s", n, err.Error())
+				continue
+			}
+
+			if peerAddr.IP.String() != h.Self.Addr.Ip.String() || peerAddr.Port != h.Peer.Addr.Port {
+				continue
+			}
+
+			var meta BaseData
+			err = json.Unmarshal(buf[:n], &meta)
+			if err != nil {
+				logrus.Debugf("JSON Error: %s", err.Error())
+				continue
+			}
+
+			switch meta.Type {
+			case FileReqest:
+				filereq, err := ConvertMapToFileReqestMeta(meta.Data)
+				if err != nil {
+					logrus.Errorf("Decode Error: %s", err)
+					continue
+				}
+
+				err = SendFile(h, filereq)
+				if err != nil {
+					logrus.Error(err)
+				}
+				h.ResetConn()
+
+				//rewrite Prefix
+				fmt.Printf("> ")
+			case Message:
+				// 他のメッセージ処理
+			case Ping:
+				RecordPingTime()
+			case FileIndex:
+				logrus.Debug("Ignoring FileIndex packet in Receiver")
+				continue
+			default:
+				logrus.Debugf("Ignoring unknown packet type: %d", dataType(meta.Type))
+				continue
+			}
 		}
 	}
 }

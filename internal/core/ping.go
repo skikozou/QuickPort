@@ -17,7 +17,6 @@ var (
 func (h *Handle) Ping() {
 	for {
 		Write(h.Self.Conn, h.Peer.Addr.StrAddr(), &BaseData{Type: Ping})
-		logrus.Info("do ping!")
 
 		time.Sleep(5 * time.Second)
 	}
@@ -41,7 +40,6 @@ func RecordPingTime() {
 	defer mu.Unlock()
 
 	resetTimer()
-	logrus.Info("get ping!")
 }
 
 func resetTimer() {

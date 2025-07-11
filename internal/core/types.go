@@ -80,6 +80,7 @@ type Address struct {
 	Port int
 }
 type Handle struct {
-	Self *SelfConfig
-	Peer *PeerConfig
+	Self  *SelfConfig
+	Peer  *PeerConfig
+	Pause chan bool
 }
