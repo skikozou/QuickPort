@@ -42,7 +42,7 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 		return fmt.Errorf("failed to send request: %v", err)
 	}
 
-	// Step 2: インデックス情報受信
+	// Step 2: インデックス情報受信 (SubConnを使用)
 	logrus.Info("Waiting for file index...")
 	indexData, err := receiveFileIndex(handle)
 	if err != nil {

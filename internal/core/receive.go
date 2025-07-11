@@ -45,6 +45,9 @@ func (h *Handle) Receiver() {
 			// 他のメッセージ処理
 		case Ping:
 			RecordPingTime()
+		case FileIndex:
+			// FileIndexはgetFileが直接受信するため、ここでは無視
+			logrus.Debug("Ignoring FileIndex packet in Receiver")
 		}
 	}
 }
@@ -67,6 +70,7 @@ func calculateBinaryHash(raw []byte) (string, error) {
 }
 
 func receiveFileIndex(handle *Handle) (*FileIndexData, error) {
+	// FileIndexはSubConnで受信
 	for {
 		logrus.Debug("loop")
 		meta, err := receiveFromPeer(handle.Self, handle.Peer, true)

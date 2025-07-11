@@ -63,7 +63,7 @@ func SendFile(handle *Handle, filereq *fileRequestData) error {
 	chunkCount := uint32((compressedSize + int64(ChunkSize) - 1) / int64(ChunkSize))
 	logrus.Debugf("chunk count: %d", chunkCount)
 
-	// Step 5: ファイルインデックス情報送信
+	// Step 5: ファイルインデックス情報送信 (SubConnで送信)
 	indexData := BaseData{
 		Type: FileIndex,
 		Data: FileIndexData{
