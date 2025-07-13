@@ -25,8 +25,6 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 		compMode = args.Next().Head()
 	}
 
-	logrus.Debug(compMode)
-
 	// Step 1: ファイルリクエスト送信
 	logrus.Infof("Requesting file: %s", filePath)
 	reqData := BaseData{

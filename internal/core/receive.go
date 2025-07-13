@@ -103,13 +103,10 @@ func calculateBinaryHash(raw []byte) (string, error) {
 func receiveFileIndex(handle *Handle) (*FileIndexData, error) {
 	// FileIndexはSubConnで受信
 	for {
-		logrus.Debug("loop")
 		meta, err := receiveFromPeer(handle.Self, handle.Peer, true)
 		if err != nil {
 			return nil, err
 		}
-
-		logrus.Debug("received")
 
 		if meta.Type != FileIndex {
 			logrus.Debugf("Ignoring packet type: %d, waiting for FileIndex", meta.Type)

@@ -45,6 +45,14 @@ func receiveFromPeer(self *SelfConfig, peer *PeerConfig, useSub bool) (*BaseData
 			return nil, err
 		}
 
+		if meta.Type == Error {
+			errpacket, err := convertMapToErrorPacketData(meta.Data)
+			if err != nil {
+				return nil, err
+			}
+			return nil, fmt.Errorf("peer error: %s", errpacket.Error)
+		}
+
 		return &meta, nil
 	}
 }

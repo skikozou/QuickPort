@@ -7,6 +7,7 @@ import (
 )
 
 type dataType int
+type ErrorCode int
 
 const (
 	SyncTray dataType = iota
@@ -17,6 +18,12 @@ const (
 	File
 	PacketInfo
 	Ping
+	Error
+)
+
+const (
+	FileNotFound ErrorCode = 0
+	WHA
 )
 
 const (
@@ -73,6 +80,10 @@ type BaseData struct {
 type fileRequestData struct {
 	FilePath string
 	CompMode string
+}
+type ErrorPacketData struct {
+	Error string
+	Code  ErrorCode
 }
 
 type Address struct {

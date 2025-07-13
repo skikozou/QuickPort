@@ -15,10 +15,23 @@ var (
 )
 
 func (h *Handle) Ping() {
+	isPause := false
 	for {
-		Write(h.Self.Conn, h.Peer.Addr.StrAddr(), &BaseData{Type: Ping})
+		select {
+		case p, ok := <-h.Pause:
+			if ok {
+				isPause = p
+				continue
+			}
+		default:
+			if isPause {
+				continue
+			}
 
-		time.Sleep(5 * time.Second)
+			Write(h.Self.Conn, h.Peer.Addr.StrAddr(), &BaseData{Type: Ping})
+
+			time.Sleep(5 * time.Second)
+		}
 	}
 }
 

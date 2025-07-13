@@ -77,3 +77,17 @@ func convertMapToFinishPacketData(input interface{}) (*FinishPacketData, error) 
 	}
 	return &data, nil
 }
+
+func convertMapToErrorPacketData(input interface{}) (*ErrorPacketData, error) {
+	bytes, err := json.Marshal(input)
+	if err != nil {
+		return nil, err
+	}
+
+	var data ErrorPacketData
+	err = json.Unmarshal(bytes, &data)
+	if err != nil {
+		return nil, err
+	}
+	return &data, nil
+}
