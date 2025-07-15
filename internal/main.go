@@ -52,7 +52,7 @@ func main() {
 	var handle *core.Handle
 	switch mode {
 	case utils.GenToken:
-		err := tray.SetTray("../tray/")
+		err := tray.SetTray(utils.Tray1)
 		if err != nil {
 			logrus.Error(err)
 			return
@@ -64,7 +64,7 @@ func main() {
 		}
 
 	case utils.UseToken:
-		err := tray.SetTray("../tray2/")
+		err := tray.SetTray(utils.Tray2)
 		if err != nil {
 			logrus.Error(err)
 			return
