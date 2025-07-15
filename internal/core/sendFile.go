@@ -23,10 +23,12 @@ func SendFile(handle *Handle, filereq *fileRequestData) error {
 	logrus.Debugf("fileinfo: %v", fileInfo)
 	if err != nil {
 		logrus.Errorf("File not found: %s", filereq.FilePath)
-		return fmt.Errorf("file not found: %v", err)
+		handle.SendError(&ErrorPacketData{Error: "File not found", Code: FileNotFound}, true)
+		return nil
 	}
 
 	if fileInfo.IsDir() {
+		handle.SendError(&ErrorPacketData{Error: "File not found", Code: FailedCalcFileHash}, true)
 		return fmt.Errorf("path is a directory, not a file: %s", filereq.FilePath)
 	}
 
@@ -34,12 +36,14 @@ func SendFile(handle *Handle, filereq *fileRequestData) error {
 	originalFileHash, err := calculateFileHash(fullpath)
 	logrus.Debugf("original file hash: %s", originalFileHash)
 	if err != nil {
+		handle.SendError(&ErrorPacketData{Error: "failed to calculate file hash", Code: FailedCalcFileHash}, true)
 		return fmt.Errorf("failed to calculate file hash: %v", err)
 	}
 
 	// Step 3: ファイルを読み込んで圧縮
 	file, err := os.Open(fullpath)
 	if err != nil {
+		handle.SendError(&ErrorPacketData{Error: "failed to file operations", Code: FailedFileOperations}, true)
 		return fmt.Errorf("failed to open file: %v", err)
 	}
 	defer file.Close()
@@ -47,12 +51,14 @@ func SendFile(handle *Handle, filereq *fileRequestData) error {
 	// ファイル全体を読み込み
 	raw, err := io.ReadAll(file)
 	if err != nil {
+		handle.SendError(&ErrorPacketData{Error: "failed to file operations", Code: FailedFileOperations}, true)
 		return fmt.Errorf("failed to read file: %v", err)
 	}
 
 	// 圧縮処理
 	compressed, err := Compress(raw, filereq.CompMode)
 	if err != nil {
+		handle.SendError(&ErrorPacketData{Error: "failed to file compress", Code: FailedCompress}, true)
 		return fmt.Errorf("failed to compress file: %v", err)
 	}
 
@@ -88,7 +94,8 @@ func SendFile(handle *Handle, filereq *fileRequestData) error {
 	for {
 		meta, err := receiveFromPeer(handle.Self, handle.Peer, true)
 		if err != nil {
-			return fmt.Errorf("failed to receive start signal: %v", err)
+			logrus.Debug(fmt.Sprintf("failed to receive start signal: %v", err))
+			continue
 		}
 
 		if meta.Type == Message {
@@ -118,6 +125,8 @@ func SendFile(handle *Handle, filereq *fileRequestData) error {
 		// 分割パケットを受信して結合
 		missingChunks, finished, err := receiveMissingChunksList(handle)
 		if err != nil {
+			handle.SendError(&ErrorPacketData{Error: "failed to receive missing chunks list", Code: FaildReceive}, true)
+			//retry
 			return fmt.Errorf("failed to receive missing chunks list: %v", err)
 		}
 
@@ -137,12 +146,16 @@ func SendFile(handle *Handle, filereq *fileRequestData) error {
 		// 圧縮されたデータから欠落チャンクを再送
 		err = sendMissingChunks(handle, compressed, missingChunks)
 		if err != nil {
+			handle.SendError(&ErrorPacketData{Error: "failed to receive missing chunks", Code: FaildReceive}, true)
+			//retry
 			return fmt.Errorf("failed to resend missing chunks: %v", err)
 		}
 
 		retryCount++
 	}
 
+	handle.SendError(&ErrorPacketData{Error: "maximum retries exceeded, file transfer failed", Code: LimitExceeded}, true)
+	//retry
 	return fmt.Errorf("maximum retries exceeded, file transfer failed")
 }
 

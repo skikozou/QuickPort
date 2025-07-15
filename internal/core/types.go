@@ -8,6 +8,7 @@ import (
 
 type dataType int
 type ErrorCode int
+type RecoverCode int
 
 const (
 	SyncTray dataType = iota
@@ -22,8 +23,20 @@ const (
 )
 
 const (
-	FileNotFound ErrorCode = 0
-	WHA
+	FileNotFound ErrorCode = iota
+	FailedFileOperations
+	FailedCalcFileHash
+	FailedCompress
+	FailedDeCompress
+	FaildReceive
+	NetworkError
+	LimitExceeded
+	MissingChunk
+)
+
+const (
+	ResendPacket RecoverCode = iota
+	ResetConnection
 )
 
 const (
