@@ -44,6 +44,8 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 	logrus.Info("Waiting for file index...")
 	indexData, err := receiveFileIndex(handle)
 	if err != nil {
+		handle.SendError(&ErrorPacketData{Error: "failed to receive file index", Code: FaildReceive}, true)
+		//retry
 		return fmt.Errorf("failed to receive file index: %v", err)
 	}
 
@@ -53,11 +55,13 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 	outputPath := filepath.Join(tray.UseTray(), filepath.Base(filePath))
 	err = os.MkdirAll(filepath.Dir(outputPath), 0755)
 	if err != nil {
+		handle.SendError(&ErrorPacketData{Error: "failed to create output directory", Code: FailedFileOperations}, true)
 		return fmt.Errorf("failed to create output directory: %v", err)
 	}
 
 	file, err := os.Create(outputPath)
 	if err != nil {
+		handle.SendError(&ErrorPacketData{Error: "failed to create output file", Code: FailedFileOperations}, true)
 		return fmt.Errorf("failed to create output file: %v", err)
 	}
 	defer file.Close()
@@ -88,6 +92,8 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 				logrus.Warn("Timeout occurred, requesting missing chunks...")
 				break
 			}
+
+			handle.SendError(&ErrorPacketData{Error: "failed to receive chunk", Code: FaildReceive}, true)
 			return fmt.Errorf("failed to receive chunk: %v", err)
 		}
 
@@ -129,7 +135,11 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 					break
 				}
-				return fmt.Errorf("failed to receive missing chunk: %v", err)
+
+				handle.SendError(&ErrorPacketData{Error: "failed to receive missing chunk", Code: FaildReceive}, true)
+
+				logrus.Debug(fmt.Sprintf("failed to receive missing chunk: %v", err))
+				continue
 			}
 
 			// チェックサム検証
@@ -163,6 +173,8 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 		if chunkData, exists := receivedChunks[i]; exists {
 			compressedData = append(compressedData, chunkData...)
 		} else {
+			handle.SendError(&ErrorPacketData{Error: "failed to receive chunk", Code: FaildReceive}, true)
+			//retry
 			return fmt.Errorf("missing chunk %d after retry", i)
 		}
 	}
@@ -170,12 +182,14 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 	// 圧縮されたデータを展開
 	decompressedData, err := Decompress(compressedData, compMode)
 	if err != nil {
+		handle.SendError(&ErrorPacketData{Error: "failed to decompress", Code: FailedDeCompress}, true)
 		return fmt.Errorf("failed to decompress data: %v", err)
 	}
 
 	// 展開されたデータをファイルに書き込み
 	_, err = file.Write(decompressedData)
 	if err != nil {
+		handle.SendError(&ErrorPacketData{Error: "failed to write decompressed data", Code: FailedFileOperations}, true)
 		return fmt.Errorf("failed to write decompressed data: %v", err)
 	}
 
@@ -183,6 +197,7 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 	file.Close()
 	receivedHash, err := calculateFileHash(outputPath)
 	if err != nil {
+		handle.SendError(&ErrorPacketData{Error: "failed to calculate file hash", Code: FailedCalcFileHash}, true)
 		return fmt.Errorf("failed to calculate file hash: %v", err)
 	}
 

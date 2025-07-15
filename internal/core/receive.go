@@ -108,6 +108,17 @@ func receiveFileIndex(handle *Handle) (*FileIndexData, error) {
 			return nil, err
 		}
 
+		if meta.Type != Error {
+			packet, err := convertMapToErrorPacketData(meta.Data)
+			if err != nil {
+				return nil, err
+			}
+
+			if packet.Code == FileNotFound {
+
+			}
+		}
+
 		if meta.Type != FileIndex {
 			logrus.Debugf("Ignoring packet type: %d, waiting for FileIndex", meta.Type)
 			continue
