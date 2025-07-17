@@ -628,3 +628,165 @@ func showProgress(total int) {
     }
 }
 ```
+
+## 14. 詳細実装定義
+
+### 14.1 パケットタイプ定義
+```go
+const (
+    // 基本パケット種別
+    PacketTypeControl uint8 = iota  // 0: 制御パケット
+    PacketTypeFile                  // 1: ファイル転送
+    PacketTypeMessage               // 2: メッセージング
+
+    // 制御パケットのサブタイプ
+    PacketSubTypeConnectionRequest uint8 = iota  // 接続要求
+    PacketSubTypeConnectionResponse            // 接続応答
+    PacketSubTypeConnectionConfirm             // 接続確認
+    PacketSubTypeDisconnect                    // 切断通知
+    PacketSubTypeKeepAlive                     // 生存確認
+    PacketSubTypeChunkTest                     // チャンクサイズテスト
+    PacketSubTypeChunkResult                   // チャンクテスト結果
+)
+```
+
+### 14.2 コアインターフェース定義
+
+#### 14.2.1 ネットワーク層
+```go
+type NetworkManager interface {
+    Listen(port int) error
+    Connect(ip string, port int) error
+    Send(data []byte) error
+    Receive() ([]byte, error)
+    Close() error
+}
+```
+
+#### 14.2.2 パケット層
+```go
+type PacketManager interface {
+    CreatePacket(typ uint8, payload interface{}) (*Packet, error)
+    ParsePacket(data []byte) (*Packet, error)
+    ValidateChecksum(packet *Packet) bool
+}
+```
+
+#### 14.2.3 転送層
+```go
+type TransferManager interface {
+    SendFile(path string) error
+    ReceiveFile(info FileInfo) error
+    SendMessage(message string) error
+    ReceiveMessage() (string, error)
+}
+```
+
+#### 14.2.4 セッション層
+```go
+type SessionManager interface {
+    Start() error
+    Stop() error
+    Status() SessionStatus
+    HandlePacket(*Packet) error
+}
+```
+
+### 14.3 状態遷移図
+
+```mermaid
+stateDiagram-v2
+    [*] --> Initialized
+    Initialized --> WaitingConnection: ホストモード
+    Initialized --> ConnectingToHost: クライアントモード
+    
+    WaitingConnection --> Connected: 接続要求受信
+    ConnectingToHost --> Connected: 接続承認
+    
+    Connected --> ChunkTesting: チャンクサイズ測定
+    ChunkTesting --> Ready: 測定完了
+    
+    Ready --> FileTransfer: ファイル転送開始
+    Ready --> Messaging: メッセージ送信
+    
+    FileTransfer --> Ready: 転送完了
+    Messaging --> Ready: 送信完了
+    
+    state Disconnected {
+        [*] --> ReconnectWait
+        ReconnectWait --> ConnectingToHost: 再接続試行
+    }
+```
+
+### 14.4 エラーコード体系
+
+```go
+type ErrorCode uint16
+
+const (
+    // ネットワークエラー (1000-1999)
+    ErrNetworkTimeout ErrorCode = iota + 1000
+    ErrConnectionRefused
+    ErrInvalidAddress
+    
+    // プロトコルエラー (2000-2999)
+    ErrInvalidPacket ErrorCode = iota + 2000
+    ErrChecksumMismatch
+    ErrInvalidSequence
+    
+    // トランスファーエラー (3000-3999)
+    ErrFileNotFound ErrorCode = iota + 3000
+    ErrFileAccessDenied
+    ErrInsufficientSpace
+    
+    // セッションエラー (4000-4999)
+    ErrInvalidToken ErrorCode = iota + 4000
+    ErrSessionExpired
+    ErrTooManyRetries
+)
+```
+
+### 14.5 システムメッセージ定義
+
+```go
+const (
+    // 接続関連メッセージ
+    MsgConnecting          = "接続中..."
+    MsgConnectionAccepted  = "接続が確立されました"
+    MsgConnectionRefused   = "接続が拒否されました: %s"
+    
+    // 転送関連メッセージ
+    MsgTransferStarted     = "転送開始: %s"
+    MsgTransferProgress    = "転送中: %d%%"
+    MsgTransferComplete    = "転送完了: %s"
+    MsgTransferFailed      = "転送失敗: %s"
+    
+    // セッション関連メッセージ
+    MsgSessionEstablished  = "セッション確立"
+    MsgSessionClosed       = "セッション終了"
+    MsgDisconnected        = "切断されました"
+)
+```
+
+### 14.6 実装優先順位
+
+1. 基本通信機能
+   - UDP接続確立
+   - パケット送受信
+   - エラーハンドリング
+
+2. セッション管理
+   - トークン生成/検証
+   - 接続確立フロー
+   - 状態管理
+
+3. データ転送
+   - チャンク分割/結合
+   - 進捗管理
+   - 再送制御
+
+4. ユーザーインターフェース
+   - コマンド処理
+   - 進捗表示
+   - エラー通知
+```
