@@ -297,3 +297,334 @@ go build -o quickport ./cmd/quickport
 # クライアントモード
 ./quickport --token <接続トークン>
 ```
+
+## 12. 接続確立フロー
+
+### 12.1 トークン構造
+
+```go
+// トークンデータ構造
+type TokenData struct {
+    Version    uint8     // トークンバージョン
+    Name       string    // ホスト名
+    IP         net.IP    // ホストのIPアドレス
+    Port       uint16    // ホストのUDPポート
+    Timestamp  int64     // トークン生成時のUNIXタイムスタンプ
+    Salt       []byte    // ランダムソルト (16バイト)
+}
+```
+
+トークン生成手順：
+1. TokenDataをJSONにシリアライズ
+2. データを圧縮（zlib）
+3. enc52エンコード
+
+### 12.2 接続シーケンス
+
+```sequence
+Host -> Host: トークン生成
+Client -> Client: トークンデコード
+Client -> Host: 接続リクエスト
+Host -> Client: 接続応答 (Accept/Reject)
+Client -> Host: 接続確認
+Host -> Client: チャンクサイズ測定開始
+Host -> Client: テストパケット送信
+Client -> Host: 測定結果送信
+Host -> Client: セッション確立完了
+```
+
+### 12.3 パケットタイプ（接続フェーズ）
+
+```go
+const (
+    // 接続関連パケット
+    PacketTypeConnectionRequest  uint8 = 1
+    PacketTypeConnectionResponse uint8 = 2
+    PacketTypeConnectionConfirm  uint8 = 3
+    PacketTypeChunkSizeTest     uint8 = 4
+    PacketTypeChunkSizeResult   uint8 = 5
+    PacketTypeSessionReady      uint8 = 6
+)
+
+// 接続リクエストデータ
+type ConnectionRequest struct {
+    ClientName   string    // クライアント名
+    ClientPort   uint16    // クライアントのポート
+    TokenHash    []byte    // トークンの検証用ハッシュ
+}
+
+// 接続レスポンスデータ
+type ConnectionResponse struct {
+    Status      uint8     // 0: 拒否, 1: 許可
+    Reason      string    // 拒否理由（拒否時のみ）
+    SessionID   uint64    // セッションID（許可時のみ）
+}
+```
+
+### 12.4 接続フロー詳細
+
+#### 1. トークン生成（ホスト側）
+```go
+func GenerateToken() string {
+    tokenData := TokenData{
+        Version:    1,
+        Name:      "HostName",
+        IP:        localIP,
+        Port:      localPort,
+        Timestamp: time.Now().Unix(),
+        Salt:      generateRandomSalt(16),
+    }
+    // シリアライズ、圧縮、エンコード処理
+}
+```
+
+#### 2. トークンデコード（クライアント側）
+- enc52デコード
+- 解凍
+- JSONデシリアライズ
+- タイムスタンプ検証（有効期限10分）
+
+#### 3. 接続リクエスト送信（クライアント側）
+- ホストのIP:Portに接続リクエストパケット送信
+- トークンハッシュを含めて送信（検証用）
+- 最大3回まで再試行（3秒間隔）
+
+#### 4. 接続応答処理（ホスト側）
+- トークンハッシュ検証
+- クライアント情報の検証
+- セッションID生成
+- 応答送信
+
+#### 5. チャンクサイズ測定
+- 段階的なサイズでテストパケット送信
+- 往復時間（RTT）計測
+- パケットロス率計測
+- 最適なチャンクサイズ決定
+
+### 12.5 エラーケース
+
+1. トークン無効
+```sequence
+Client -> Host: 接続リクエスト（無効なトークン）
+Host -> Client: 拒否応答（理由: 無効なトークン）
+```
+
+2. タイムアウト
+```sequence
+Client -> Host: 接続リクエスト
+Client -> Client: タイムアウト（3秒）
+Client -> Host: 接続リクエスト（再試行1）
+```
+
+3. チャンクサイズ測定失敗
+```sequence
+Host -> Client: テストパケット
+Client -> Host: 測定失敗通知
+Host -> Client: 最小サイズでの再測定開始
+```
+
+### 12.6 セキュリティ考慮事項
+
+1. トークン有効期限
+- 生成から10分間のみ有効
+- タイムスタンプチェックで制御
+
+2. トークン検証
+- ソルトによる予測防止
+- ハッシュによる改ざん検知
+
+3. 接続制限
+- 同時接続数の制限（1接続のみ）
+- IP単位の接続試行回数制限
+
+## 13. 入出力管理
+
+### 13.1 ロギング (Output)
+- パッケージ: github.com/sirupsen/logrus
+- ログレベル:
+  ```go
+  logrus.ErrorLevel   // エラー（接続失敗など）
+  logrus.WarnLevel    // 警告（再試行など）
+  logrus.InfoLevel    // 情報（接続確立など）
+  logrus.DebugLevel   // デバッグ情報
+  ```
+- フォーマット設定:
+  ```go
+  logrus.SetFormatter(&logrus.TextFormatter{
+      FullTimestamp:   true,
+      TimestampFormat: "2006-01-02 15:04:05",
+  })
+  ```
+
+### 13.2 ユーザー入力 (Input)
+- パッケージ: github.com/AlecAivazis/survey/v2
+- スタイル設定:
+  ```go
+  // グローバルスタイル定義
+  surveyCore.SetTheme(&surveyCore.Theme{
+      Question:  &surveyCore.Styler{FgCyan: true},
+      Help:      &surveyCore.Styler{FgBlue: true},
+      Error:     &surveyCore.Styler{FgRed: true, Bold: true},
+      SelectFocus: &surveyCore.Styler{FgCyan: true},
+  })
+  ```
+
+#### 13.2.1 入力タイプ
+
+1. コマンド選択メニュー
+```go
+var commandPrompt = &survey.Select{
+    Message: "選択してください:",
+    Options: []string{
+        "ファイル送信",
+        "メッセージ送信",
+        "状態確認",
+        "終了",
+    },
+    Help: "↑↓で選択、Enterで決定",
+}
+```
+
+2. ファイル選択
+```go
+var filePrompt = &survey.Input{
+    Message: "ファイルパス:",
+    Help: "送信したいファイルのパスを入力",
+    Suggest: func(toComplete string) []string {
+        // ファイルパスの補完候補を提供
+        return getFileSuggestions(toComplete)
+    },
+}
+```
+
+3. メッセージ入力
+```go
+var messagePrompt = &survey.Input{
+    Message: "メッセージ:",
+    Help: "送信したいメッセージを入力",
+}
+```
+
+4. 確認ダイアログ
+```go
+var confirmPrompt = &survey.Confirm{
+    Message: "続行しますか?",
+    Help: "Y/N で選択",
+}
+```
+
+#### 13.2.2 入力バリデーション
+```go
+var validators = map[string]*survey.InputValidator{
+    "token": survey.ComposeValidators(
+        survey.Required,
+        survey.MinLength(8),
+    ),
+    "filepath": survey.ComposeValidators(
+        survey.Required,
+        survey.PathExists,
+    ),
+}
+```
+
+### 13.3 入出力インターフェース
+
+```go
+// IO管理インターフェース
+type IOManager interface {
+    // 出力関連（logrus）
+    Info(format string, args ...interface{})
+    Error(format string, args ...interface{})
+    Debug(format string, args ...interface{})
+    Warning(format string, args ...interface{})
+    
+    // 入力関連（survey）
+    AskCommand() (string, error)
+    AskToken() (string, error)
+    AskFilePath() (string, error)
+    AskMessage() (string, error)
+    Confirm(message string) (bool, error)
+}
+
+// 実装例
+type DefaultIOManager struct {
+    logger *logrus.Logger
+}
+```
+
+### 13.4 入力処理の具体例
+
+#### トークン入力
+```go
+func (m *DefaultIOManager) AskToken() (string, error) {
+    token := ""
+    prompt := &survey.Input{
+        Message: "接続トークンを入力してください:",
+        Help:    "相手から受け取ったトークンを入力",
+    }
+    
+    err := survey.AskOne(prompt, &token, survey.WithValidator(validators["token"]))
+    return token, err
+}
+```
+
+#### ファイル送信フロー
+```go
+func (m *DefaultIOManager) HandleFileSend() error {
+    // ファイルパス入力
+    filePath := ""
+    err := survey.AskOne(filePrompt, &filePath, survey.WithValidator(validators["filepath"]))
+    if err != nil {
+        return err
+    }
+    
+    // 確認
+    confirm := false
+    confirmMsg := fmt.Sprintf("'%s' を送信しますか?", filePath)
+    err = survey.AskOne(&survey.Confirm{Message: confirmMsg}, &confirm)
+    if err != nil || !confirm {
+        return err
+    }
+    
+    // 送信処理...
+    return nil
+}
+```
+
+### 13.5 エラーハンドリング
+
+```go
+// エラー種別
+var (
+    ErrInterrupt = errors.New("operation interrupted")
+    ErrInvalid   = errors.New("invalid input")
+)
+
+// エラー処理例
+func handleInputError(err error) {
+    switch {
+    case errors.Is(err, ErrInterrupt):
+        logrus.Info("操作がキャンセルされました")
+    case errors.Is(err, ErrInvalid):
+        logrus.Error("無効な入力です")
+    default:
+        logrus.Errorf("入力エラー: %v", err)
+    }
+}
+```
+
+### 13.6 プログレス表示
+
+```go
+func showProgress(total int) {
+    prompt := &survey.Progress{
+        Message: "送信中...",
+        Total:   total,
+    }
+    
+    for i := 0; i < total; i++ {
+        prompt.Increment()
+        time.Sleep(time.Millisecond * 100)
+    }
+}
+```
