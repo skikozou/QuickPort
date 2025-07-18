@@ -2,6 +2,7 @@ package core
 
 import (
 	"QuickPort/tray"
+	"QuickPort/ui"
 	"fmt"
 	"hash/crc32"
 	"net"
@@ -82,6 +83,9 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 	receivedChunks := make(map[uint32][]byte) // チャンクデータも保存
 	missingChunks := make([]uint32, 0)
 
+	//チャンクマップのセットアップ (チャンクからマスの計算とか)
+	chunks := ui.MakeChunks(int(indexData.ChunkCount))
+
 	for len(receivedChunks) < int(indexData.ChunkCount) {
 		// タイムアウト設定
 		handle.Self.SubConn.SetReadDeadline(time.Now().Add(time.Second * ChunkTimeoutSeconds))
@@ -105,6 +109,8 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 		}
 
 		// チャンクデータを保存（圧縮されたまま）
+		//チャンクマップの更新
+		go ui.UpdateState(chunks, int(chunk.Index), true)
 		receivedChunks[chunk.Index] = chunk.Data
 		logrus.Debugf("Received chunk %d/%d", len(receivedChunks), indexData.ChunkCount)
 	}
@@ -152,7 +158,9 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 			// チャンクデータを保存
 			receivedChunks[chunk.Index] = chunk.Data
 
+			//チャンクマップの更新
 			// 欠落リストから削除
+			go ui.UpdateState(chunks, int(chunk.Index), true)
 			for i, missing := range missingChunks {
 				if missing == chunk.Index {
 					missingChunks = append(missingChunks[:i], missingChunks[i+1:]...)
@@ -165,6 +173,7 @@ func GetFile(handle *Handle, args *ShellArgs) error {
 	}
 
 	// Step 7: 全チャンクを結合して展開
+	ui.ClearState(chunks)
 	logrus.Info("Reconstructing file from chunks...")
 
 	// 圧縮されたデータを結合
